@@ -510,7 +510,10 @@
       <section class="panel">
         <div class="panel-head">
           <h2>売上入金</h2>
-          <div class="actions"><button class="button secondary small" id="exportSalesCsv" type="button">CSV</button></div>
+          <div class="actions">
+            <label class="button secondary small file-button">通帳CSV取込<input id="importSalesCsvInput" type="file" accept=".csv,text/csv"></label>
+            <button class="button secondary small" id="exportSalesCsv" type="button">CSV</button>
+          </div>
         </div>
         <div class="panel-body">
           <form id="salesForm" class="form-grid">
@@ -534,6 +537,7 @@
     `;
 
     document.getElementById("salesForm").addEventListener("submit", handleSalesSubmit);
+    document.getElementById("importSalesCsvInput").addEventListener("change", importSalesCsv);
     document.getElementById("exportSalesCsv").addEventListener("click", () => exportCsv("sales", sales, [
       ["date", "入金日"], ["customer", "取引先"], ["content", "項目"], ["classification", "分類"],
       ["department", "部門"], ["amount", "売上額"], ["invoiceNo", "請求書番号"], ["bankAccount", "通帳"], ["note", "メモ"]
@@ -803,7 +807,10 @@
       <section class="panel">
         <div class="panel-head">
           <h2>カード台帳</h2>
-          <button class="button secondary small" id="exportCardCsv" type="button">CSV</button>
+          <div class="actions">
+            <label class="button secondary small file-button">カードCSV取込<input id="importCardCsvInput" type="file" accept=".csv,text/csv"></label>
+            <button class="button secondary small" id="exportCardCsv" type="button">CSV</button>
+          </div>
         </div>
         <div class="panel-body">
           <div class="grid cols-3">
@@ -821,6 +828,7 @@
       </section>
     `;
 
+    document.getElementById("importCardCsvInput").addEventListener("change", importCardCsv);
     document.getElementById("exportCardCsv").addEventListener("click", () => exportCsv("card-ledger", cardExpenses, [
       ["date", "日付"], ["vendor", "取引先"], ["category", "経費科目"], ["department", "部門"], ["itemName", "品名"],
       ["amount", "金額"], ["taxRate", "税区分"], ["registrationNumber", "T番号"], ["invoiceEligible", "インボイス適格"], ["note", "摘要"]
@@ -840,6 +848,7 @@
           <h2>締め登録</h2>
           <div class="actions">
             <button class="button secondary small" id="exportPackage" type="button">税理士提出パック</button>
+            <button class="button secondary small" id="exportSubmissionSummary" type="button">提出サマリー</button>
             <button class="button secondary small" id="exportClosingCsv" type="button">締めCSV</button>
           </div>
         </div>
@@ -868,6 +877,7 @@
 
     document.getElementById("closingForm").addEventListener("submit", handleClosingSubmit);
     document.getElementById("exportPackage").addEventListener("click", exportAccountantPackage);
+    document.getElementById("exportSubmissionSummary").addEventListener("click", exportSubmissionSummary);
     document.getElementById("exportClosingCsv").addEventListener("click", () => exportCsv("closings", closings, [
       ["month", "対象月"], ["closeType", "締め"], ["status", "状態"], ["note", "メモ"], ["createdAt", "登録日時"]
     ]));
@@ -1503,6 +1513,10 @@
       button.addEventListener("click", () => showDetail(button.dataset.collection, button.dataset.id));
     });
 
+    app.querySelectorAll("[data-action='edit']").forEach((button) => {
+      button.addEventListener("click", () => showEditForm(button.dataset.collection, button.dataset.id));
+    });
+
     app.querySelectorAll("[data-action='preview']").forEach((button) => {
       button.addEventListener("click", () => showDetail("expenses", button.dataset.id));
     });
@@ -1553,6 +1567,161 @@
     dialog.showModal();
   }
 
+  function showEditForm(collection, id) {
+    const item = (state[collection] || []).find((record) => record.id === id);
+    if (!item) return;
+    dialogTitle.textContent = "編集";
+    dialogBody.innerHTML = `
+      <form id="editRecordForm" class="form-grid">
+        ${editFieldsFor(collection, item)}
+        <div class="actions" style="grid-column:1 / -1;">
+          <button class="button" type="submit">保存</button>
+          <button class="button secondary" data-action="cancel-edit" type="button">キャンセル</button>
+        </div>
+      </form>
+    `;
+    const form = document.getElementById("editRecordForm");
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      await updateRecordFromEdit(collection, id, form);
+      dialog.close();
+      persist("編集保存");
+      render();
+    });
+    form.querySelector("[data-action='cancel-edit']").addEventListener("click", () => dialog.close());
+    dialog.showModal();
+  }
+
+  function editFieldsFor(collection, item) {
+    if (collection === "expenses") {
+      return `
+        ${field("date", "日付", "date", item.date || TODAY)}
+        ${field("vendor", "取引先", "text", item.vendor || "")}
+        ${selectField("category", "経費科目", categories(), item.category || "未分類")}
+        ${selectField("department", "部門", departments(), item.department || departments()[0])}
+        ${selectField("paymentMethod", "支払区分", paymentMethods, item.paymentMethod || "cash")}
+        ${field("itemName", "品名", "text", item.itemName || "")}
+        ${field("quantity", "個数", "number", item.quantity || "1")}
+        ${field("unitPrice", "単価", "number", item.unitPrice || "")}
+        ${field("amount", "金額", "number", item.amount || "")}
+        ${selectField("taxRate", "税区分", taxRates, item.taxRate || "10%")}
+        ${field("registrationNumber", "T番号", "text", item.registrationNumber || "")}
+        <label class="check-field"><input name="invoiceEligible" type="checkbox" ${item.invoiceEligible ? "checked" : ""}> インボイス適格</label>
+        <label class="field"><span>証憑差し替え</span><input name="proof" type="file" accept="image/*,application/pdf"></label>
+        <div class="notice info" style="grid-column:1 / -1;">証憑を選ばない場合、現在の証憑をそのまま残します。</div>
+        <label class="field" style="grid-column:1 / -1;"><span>摘要</span><textarea name="note">${esc(item.note || "")}</textarea></label>
+      `;
+    }
+    if (collection === "sales") {
+      return `
+        ${field("date", "入金日", "date", item.date || TODAY)}
+        ${field("customer", "取引先", "text", item.customer || "")}
+        ${field("content", "項目・内容", "text", item.content || "")}
+        ${selectField("classification", "分類", salesCategories, item.classification || "業務委託")}
+        ${selectField("department", "部門", departments(), item.department || departments()[0])}
+        ${field("amount", "売上額", "number", item.amount || "")}
+        ${field("invoiceNo", "請求書番号", "text", item.invoiceNo || "")}
+        ${field("bankAccount", "通帳", "text", item.bankAccount || state.settings.bankAccount || "道銀")}
+        <label class="field" style="grid-column:1 / -1;"><span>メモ</span><textarea name="note">${esc(item.note || "")}</textarea></label>
+      `;
+    }
+    if (collection === "invoices") {
+      return `
+        ${field("invoiceNo", "請求書番号", "text", item.invoiceNo || "")}
+        ${field("issueDate", "請求日", "date", item.issueDate || TODAY)}
+        ${field("serviceDate", "実施日", "date", item.serviceDate || "")}
+        ${field("dueDate", "支払期限", "date", item.dueDate || "")}
+        ${field("expectedPaymentDate", "入金予定日", "date", item.expectedPaymentDate || "")}
+        ${field("paymentDate", "入金日", "date", item.paymentDate || "")}
+        ${field("customer", "請求先", "text", item.customer || "")}
+        ${field("content", "内容", "text", item.content || "")}
+        ${selectField("classification", "分類", salesCategories, item.classification || "業務委託")}
+        ${selectField("department", "部門", departments(), item.department || departments()[0])}
+        ${field("amount", "金額", "number", item.amount || "")}
+        ${selectField("taxRate", "税区分", taxRates, item.taxRate || "10%")}
+        ${selectField("status", "状態", invoiceStatuses, item.status || "未入金")}
+        <label class="field" style="grid-column:1 / -1;"><span>確認メモ</span><textarea name="note">${esc(item.note || "")}</textarea></label>
+      `;
+    }
+    if (collection === "estimates") {
+      return `
+        ${field("estimateNo", "見積番号", "text", item.estimateNo || "")}
+        ${field("date", "見積日", "date", item.date || TODAY)}
+        ${field("customer", "提出先", "text", item.customer || "")}
+        ${selectField("classification", "分類", salesCategories, item.classification || "業務委託")}
+        ${selectField("department", "部門", departments(), item.department || departments()[0])}
+        ${field("content", "内容", "text", item.content || "")}
+        ${field("amount", "金額", "number", item.amount || "")}
+        ${selectField("status", "状態", ["作成中", "提出済", "受注", "失注", "保留"], item.status || "作成中")}
+        ${field("linkedInvoiceNo", "請求書番号", "text", item.linkedInvoiceNo || "")}
+        <label class="field" style="grid-column:1 / -1;"><span>メモ</span><textarea name="note">${esc(item.note || "")}</textarea></label>
+      `;
+    }
+    if (collection === "trips") {
+      return `
+        ${field("date", "日付", "date", item.date || TODAY)}
+        ${field("destination", "行先", "text", item.destination || "")}
+        ${field("purpose", "目的", "text", item.purpose || "")}
+        ${field("transport", "移動手段", "text", item.transport || "")}
+        ${field("mileage", "km", "number", item.mileage || "")}
+        ${field("fuelClaim", "ガソリン請求", "number", item.fuelClaim || "")}
+        ${field("lodging", "宿泊費", "number", item.lodging || "")}
+        ${field("total", "合計", "number", item.total || "")}
+        <label class="field" style="grid-column:1 / -1;"><span>メモ</span><textarea name="note">${esc(item.note || "")}</textarea></label>
+      `;
+    }
+    if (collection === "payroll") {
+      return `
+        ${field("payMonth", "対象月", "month", item.payMonth || TODAY.slice(0, 7))}
+        ${field("employee", "氏名", "text", item.employee || "")}
+        ${field("basePay", "基本給", "number", item.basePay || "")}
+        ${field("allowance", "手当", "number", item.allowance || "")}
+        ${field("deduction", "控除", "number", item.deduction || "")}
+        ${field("netPay", "支給額", "number", item.netPay || "")}
+        ${field("payDate", "支払日", "date", item.payDate || TODAY)}
+        <label class="field" style="grid-column:1 / -1;"><span>メモ</span><textarea name="note">${esc(item.note || "")}</textarea></label>
+      `;
+    }
+    return `
+      ${field("date", "日付", "date", item.date || TODAY)}
+      ${field("sender", "送付元", "text", item.sender || "")}
+      ${field("instructor", "講師", "text", item.instructor || "")}
+      ${field("course", "内容", "text", item.course || "")}
+      ${field("amount", "金額", "number", item.amount || "")}
+      ${selectField("status", "状態", ledgerStatuses, item.status || "未処理")}
+      <label class="field" style="grid-column:1 / -1;"><span>メモ</span><textarea name="note">${esc(item.note || "")}</textarea></label>
+    `;
+  }
+
+  async function updateRecordFromEdit(collection, id, form) {
+    const item = (state[collection] || []).find((record) => record.id === id);
+    if (!item) return;
+    const data = formValues(form);
+    const formData = new FormData(form);
+    const numericFields = ["quantity", "unitPrice", "amount", "mileage", "fuelClaim", "lodging", "total", "basePay", "allowance", "deduction", "netPay"];
+
+    Object.entries(data).forEach(([key, value]) => {
+      if (key === "proof" || key === "invoiceEligible") return;
+      item[key] = numericFields.includes(key) ? num(value) : clean(value);
+    });
+
+    if (collection === "expenses") {
+      item.invoiceEligible = Boolean(formData.get("invoiceEligible"));
+      item.registrationNumber = normalizeRegistration(item.registrationNumber);
+      const quantity = num(item.quantity) || 1;
+      const unitPrice = num(item.unitPrice);
+      if (!num(item.amount) && unitPrice) item.amount = Math.round(quantity * unitPrice);
+      const proofFile = formData.get("proof");
+      if (proofFile && proofFile.size) item.proof = await readFile(proofFile);
+    }
+    if (collection === "trips" && !num(item.total)) item.total = num(item.fuelClaim) + num(item.lodging);
+    if (collection === "payroll" && !num(item.netPay)) item.netPay = num(item.basePay) + num(item.allowance) - num(item.deduction);
+    if (collection === "sales") markInvoicePaidFromSale(item);
+    if (collection === "invoices" && item.paymentDate) item.status = "入金済";
+    item.updatedAt = new Date().toISOString();
+    addAudit(`${collection}編集`, item);
+  }
+
   function exportAllData() {
     state.settings.lastBackupAt = new Date().toISOString();
     addAudit("全体バックアップ", { fiscalYear: selectedFiscalYear });
@@ -1590,6 +1759,51 @@
     downloadJson(`税理士提出パック-${selectedFiscalYear}年度-${TODAY}.json`, payload);
   }
 
+  function exportSubmissionSummary() {
+    const expenses = fiscalItems(state.expenses, "date");
+    const sales = fiscalItems(state.sales, "date");
+    const invoices = fiscalInvoices();
+    const alerts = getAlerts();
+    const health = getDataHealth();
+    const categoryRows = summarizeExpenses(expenses);
+    const html = `<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <title>税理士提出サマリー ${selectedFiscalYear}年度</title>
+  <style>
+    body{font-family:"Yu Gothic",Meiryo,sans-serif;color:#182235;margin:28px;line-height:1.6}
+    h1{font-size:24px} h2{font-size:18px;margin-top:26px;border-bottom:2px solid #2e5f9e;padding-bottom:4px}
+    table{width:100%;border-collapse:collapse;margin-top:10px} th,td{border:1px solid #d8dee8;padding:8px;text-align:left;vertical-align:top} th{background:#e7f0fb}
+    .num{text-align:right}.bad{color:#b73838;font-weight:700}.warn{color:#b56b00;font-weight:700}.muted{color:#637087}
+  </style>
+</head>
+<body>
+  <h1>${esc(state.settings.companyName)} 税理士提出サマリー</h1>
+  <p class="muted">${selectedFiscalYear}年度 / ${formatDate(getFiscalRange(selectedFiscalYear).start)} - ${formatDate(getFiscalRange(selectedFiscalYear).end)} / 出力日 ${formatDate(TODAY)}</p>
+  <h2>提出前ステータス</h2>
+  <table><tbody>
+    <tr><th>運用点検</th><td>${health.score}点</td></tr>
+    <tr><th>経費合計</th><td>${yen(sum(expenses, "amount"))} / ${expenses.length}件</td></tr>
+    <tr><th>売上入金</th><td>${yen(sum(sales, "amount"))} / ${sales.length}件</td></tr>
+    <tr><th>請求書</th><td>${yen(sum(invoices, "amount"))} / ${invoices.length}件</td></tr>
+    <tr><th>未確認</th><td>${alerts.length}件</td></tr>
+  </tbody></table>
+  <h2>要確認事項</h2>
+  ${alerts.length ? `<table><thead><tr><th>重要度</th><th>項目</th><th>内容</th></tr></thead><tbody>${alerts.map((alert) => `<tr><td class="${alert.severity === "bad" ? "bad" : "warn"}">${alert.severity === "bad" ? "要対応" : "確認"}</td><td>${esc(alert.title)}</td><td>${esc(alert.body)}</td></tr>`).join("")}</tbody></table>` : "<p>提出前の大きな未確認はありません。</p>"}
+  <h2>経費分類</h2>
+  ${categoryRows.length ? `<table><thead><tr><th>科目</th><th class="num">金額</th><th class="num">構成比</th></tr></thead><tbody>${categoryRows.map((row) => `<tr><td>${esc(row.category)}</td><td class="num">${yen(row.amount)}</td><td class="num">${row.percent.toFixed(1)}%</td></tr>`).join("")}</tbody></table>` : "<p>経費データはありません。</p>"}
+  <h2>請求書と売上の扱い</h2>
+  <p>請求日、実施日、支払期限、入金予定日、入金日を残しています。決算またぎや売上計上日は、担当税理士に確認が必要です。</p>
+  <h2>税理士メモ</h2>
+  <p>${esc(state.settings.accountantMemo || "")}</p>
+</body>
+</html>`;
+    addAudit("提出サマリー出力", { fiscalYear: selectedFiscalYear });
+    persist("提出サマリー");
+    downloadBlob(`税理士提出サマリー-${selectedFiscalYear}年度-${TODAY}.html`, new Blob([html], { type: "text/html;charset=utf-8" }));
+  }
+
   async function importAllData(event) {
     const file = event.target.files[0];
     if (!file) return;
@@ -1606,6 +1820,89 @@
     } catch (error) {
       console.error(error);
       alert("JSONを読み込めませんでした。全体バックアップのファイルを選択してください。");
+    } finally {
+      event.target.value = "";
+    }
+  }
+
+  async function importSalesCsv(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    try {
+      const rows = csvObjects(await file.text());
+      let count = 0;
+      rows.forEach((row) => {
+        const date = normalizeDateText(pick(row, ["入金日", "取引日", "日付", "年月日", "date"]));
+        const amount = positiveAmount(pick(row, ["入金額", "金額", "取引金額", "amount"]));
+        if (!date || !amount) return;
+        const invoiceNo = pick(row, ["請求書番号", "請求番号", "invoiceNo", "invoice"]);
+        const customer = pick(row, ["取引先", "振込依頼人", "摘要", "内容", "name"]);
+        const content = pick(row, ["内容", "摘要", "取引内容", "メモ", "description"]) || "通帳CSV取込";
+        state.sales.push({
+          id: uid("sale"),
+          date,
+          customer,
+          content,
+          classification: pick(row, ["分類"]) || "その他",
+          department: pick(row, ["部門"]) || departments()[0],
+          amount,
+          invoiceNo,
+          bankAccount: pick(row, ["通帳", "銀行", "口座"]) || state.settings.bankAccount || "道銀",
+          note: `CSV取込: ${file.name}`,
+          createdAt: new Date().toISOString()
+        });
+        markInvoicePaidFromSale(state.sales[state.sales.length - 1]);
+        count += 1;
+      });
+      addAudit("通帳CSV取込", { id: `${file.name} ${count}件` });
+      persist("CSV取込");
+      alert(`${count}件の売上入金を取り込みました。`);
+      renderSales();
+    } catch (error) {
+      console.error(error);
+      alert("通帳CSVを読み込めませんでした。");
+    } finally {
+      event.target.value = "";
+    }
+  }
+
+  async function importCardCsv(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    try {
+      const rows = csvObjects(await file.text());
+      let count = 0;
+      rows.forEach((row) => {
+        const date = normalizeDateText(pick(row, ["利用日", "取引日", "日付", "年月日", "date"]));
+        const amount = positiveAmount(pick(row, ["利用金額", "金額", "取引金額", "amount"]));
+        if (!date || !amount) return;
+        state.expenses.push({
+          id: uid("exp"),
+          date,
+          vendor: pick(row, ["利用店名", "加盟店", "取引先", "摘要", "内容", "name"]),
+          category: pick(row, ["経費科目", "科目", "分類"]) || "未分類",
+          department: pick(row, ["部門"]) || departments()[0],
+          itemName: pick(row, ["品名", "内容", "摘要"]) || "カード明細",
+          quantity: 1,
+          unitPrice: amount,
+          amount,
+          taxRate: pick(row, ["税区分"]) || "不明",
+          paymentMethod: "card",
+          registrationNumber: normalizeRegistration(pick(row, ["T番号", "登録番号"])),
+          invoiceEligible: true,
+          note: `カードCSV取込: ${file.name}`,
+          proof: null,
+          createdAt: new Date().toISOString()
+        });
+        count += 1;
+      });
+      addAudit("カードCSV取込", { id: `${file.name} ${count}件` });
+      persist("CSV取込");
+      alert(`${count}件のカード経費を取り込みました。`);
+      renderCards();
+    } catch (error) {
+      console.error(error);
+      alert("カードCSVを読み込めませんでした。");
     } finally {
       event.target.value = "";
     }
@@ -1675,8 +1972,44 @@
 
   function readFile(file) {
     return new Promise((resolve, reject) => {
+      if (file.type && file.type.startsWith("image/")) {
+        compressImageFile(file).then(resolve).catch(reject);
+        return;
+      }
       const reader = new FileReader();
       reader.onload = () => resolve({ name: file.name, type: file.type, size: file.size, dataUrl: reader.result });
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function compressImageFile(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const image = new Image();
+        image.onload = () => {
+          const maxSide = 1600;
+          const scale = Math.min(1, maxSide / Math.max(image.width, image.height));
+          const canvas = document.createElement("canvas");
+          canvas.width = Math.max(1, Math.round(image.width * scale));
+          canvas.height = Math.max(1, Math.round(image.height * scale));
+          const context = canvas.getContext("2d");
+          context.drawImage(image, 0, 0, canvas.width, canvas.height);
+          const dataUrl = canvas.toDataURL("image/jpeg", 0.82);
+          resolve({
+            name: file.name.replace(/\.[^.]+$/, ".jpg"),
+            originalName: file.name,
+            type: "image/jpeg",
+            originalSize: file.size,
+            size: Math.round((dataUrl.length * 3) / 4),
+            compressed: true,
+            dataUrl
+          });
+        };
+        image.onerror = reject;
+        image.src = reader.result;
+      };
       reader.onerror = reject;
       reader.readAsDataURL(file);
     });
@@ -1984,7 +2317,7 @@
   }
 
   function rowActions(collection, id) {
-    return `<div class="actions"><button class="button small secondary" data-action="detail" data-collection="${esc(collection)}" data-id="${esc(id)}" type="button">詳細</button><button class="button small danger" data-action="delete" data-collection="${esc(collection)}" data-id="${esc(id)}" type="button">削除</button></div>`;
+    return `<div class="actions"><button class="button small secondary" data-action="detail" data-collection="${esc(collection)}" data-id="${esc(id)}" type="button">詳細</button><button class="button small secondary" data-action="edit" data-collection="${esc(collection)}" data-id="${esc(id)}" type="button">編集</button><button class="button small danger" data-action="delete" data-collection="${esc(collection)}" data-id="${esc(id)}" type="button">削除</button></div>`;
   }
 
   function paymentBadge(value) {
@@ -2116,6 +2449,73 @@
 
   function isValidRegistration(value) {
     return /^T\d{13}$/.test(String(value || ""));
+  }
+
+  function csvObjects(text) {
+    const rows = String(text || "")
+      .replace(/^\uFEFF/, "")
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map(splitCsvLine);
+    if (rows.length < 2) return [];
+    const headers = rows[0].map((header, index) => clean(header) || `列${index + 1}`);
+    return rows.slice(1).map((cells) => {
+      const row = {};
+      headers.forEach((header, index) => {
+        row[header] = clean(cells[index]);
+      });
+      return row;
+    });
+  }
+
+  function splitCsvLine(line) {
+    const cells = [];
+    let current = "";
+    let quoted = false;
+    for (let index = 0; index < line.length; index += 1) {
+      const char = line[index];
+      const next = line[index + 1];
+      if (char === '"' && quoted && next === '"') {
+        current += '"';
+        index += 1;
+      } else if (char === '"') {
+        quoted = !quoted;
+      } else if (char === "," && !quoted) {
+        cells.push(current);
+        current = "";
+      } else {
+        current += char;
+      }
+    }
+    cells.push(current);
+    return cells;
+  }
+
+  function pick(row, names) {
+    const normalized = Object.entries(row || {}).reduce((acc, [key, value]) => {
+      acc[clean(key).toLowerCase()] = value;
+      return acc;
+    }, {});
+    for (const name of names) {
+      const key = clean(name).toLowerCase();
+      if (normalized[key]) return normalized[key];
+    }
+    return "";
+  }
+
+  function normalizeDateText(value) {
+    const text = clean(value);
+    if (!text) return "";
+    const normalized = text.replace(/[年月.]/g, "/").replace(/日/g, "").replaceAll("-", "/");
+    const parts = normalized.split("/").map((part) => part.padStart(2, "0"));
+    if (parts.length === 3 && parts[0].length === 4) return `${parts[0]}-${parts[1]}-${parts[2]}`;
+    if (parts.length === 3 && parts[2].length === 4) return `${parts[2]}-${parts[0]}-${parts[1]}`;
+    return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : "";
+  }
+
+  function positiveAmount(value) {
+    return Math.abs(num(String(value || "").replace(/[^\d.-]/g, "")));
   }
 
   function formValues(form) {
