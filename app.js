@@ -839,12 +839,16 @@
         ${bookTab("subsidiary", "補助元帳")}
         ${bookTab("trial", "残高試算表")}
         ${bookTab("transition", "推移表")}
+        ${bookTab("department", "部門別集計表")}
+        ${bookTab("compare", "前期比較")}
       </div>
       ${["general", "subsidiary"].includes(bookState.tab) ? renderJournalEntryPanel() : ""}
       ${bookState.tab === "general" ? renderGeneralLedger(entries) : ""}
       ${bookState.tab === "subsidiary" ? renderSubsidiaryLedger(entries) : ""}
       ${bookState.tab === "trial" ? renderTrialBalance(entries) : ""}
       ${bookState.tab === "transition" ? renderTransitionReport(entries) : ""}
+      ${bookState.tab === "department" ? renderDepartmentReport(entries) : ""}
+      ${bookState.tab === "compare" ? renderComparisonReport(entries) : ""}
     `;
 
     bindBookEvents();
@@ -862,6 +866,7 @@
           <form id="journalForm" class="form-grid">
             ${field("date", "取引日", "date", TODAY)}
             ${field("no", "取引No", "text", nextJournalNo())}
+            ${selectField("department", "部門", departments(), departments()[0])}
             ${selectField("debitAccount", "借方勘定科目", accountOptions, "現金")}
             ${field("debitSub", "借方補助科目", "text", "")}
             ${field("debitPartner", "借方取引先", "text", "")}
@@ -958,6 +963,40 @@
     `;
   }
 
+  function renderDepartmentReport(entries) {
+    const depts = departments();
+    const rows = departmentRows(entries, bookState.report, depts);
+    return `
+      <section class="panel">
+        <div class="panel-head">
+          <h2>部門別集計表</h2>
+          <button class="button secondary small" data-book-export="department" type="button">CSV</button>
+        </div>
+        <div class="panel-body">
+          ${renderDepartmentControls()}
+          ${renderDepartmentTable(rows, depts)}
+        </div>
+      </section>
+    `;
+  }
+
+  function renderComparisonReport(entries) {
+    const previousEntries = entriesForFiscalYear(selectedFiscalYear - 1);
+    const rows = comparisonRows(entries, previousEntries, bookState.report);
+    return `
+      <section class="panel">
+        <div class="panel-head">
+          <h2>前期比較</h2>
+          <button class="button secondary small" data-book-export="compare" type="button">CSV</button>
+        </div>
+        <div class="panel-body">
+          ${renderComparisonControls()}
+          ${renderComparisonTable(rows)}
+        </div>
+      </section>
+    `;
+  }
+
   function renderBookFilterPanel(mode, entries) {
     const range = getFiscalRange(selectedFiscalYear);
     const subOptions = subAccountsForAccount(entries, bookState.account);
@@ -994,6 +1033,43 @@
         <div class="actions">
           <label class="check-field"><input type="checkbox" checked disabled> 補助科目を表示</label>
           <span class="book-tax">消費税 <strong>${bookState.taxMode === "taxIncluded" ? "税込" : "税抜"}</strong></span>
+        </div>
+      </div>
+    `;
+  }
+
+  function renderDepartmentControls() {
+    const range = getFiscalRange(selectedFiscalYear);
+    return `
+      <div class="report-toolbar stacked">
+        <div class="tabs" style="margin:0;">
+          ${reportTab("bs", "貸借対照表")}
+          ${reportTab("pl", "損益計算書")}
+        </div>
+        <span class="book-range">選択期間 ${formatDate(range.start)} 〜 ${formatDate(range.end)}</span>
+        <div class="actions">
+          <label class="check-field"><input type="checkbox" checked disabled> 補助科目を表示</label>
+          <span class="book-tax">消費税 <strong>${bookState.taxMode === "taxIncluded" ? "税込" : "税抜"}</strong></span>
+          <label class="check-field"><input data-show-zero type="checkbox" ${bookState.showZero ? "checked" : ""}> 残高0円を表示</label>
+        </div>
+      </div>
+    `;
+  }
+
+  function renderComparisonControls() {
+    const range = getFiscalRange(selectedFiscalYear);
+    const previous = getFiscalRange(selectedFiscalYear - 1);
+    return `
+      <div class="report-toolbar stacked">
+        <div class="tabs" style="margin:0;">
+          ${reportTab("bs", "貸借対照表")}
+          ${reportTab("pl", "損益計算書")}
+        </div>
+        <span class="book-range">比較期間 ${formatDate(previous.start)} 〜 ${formatDate(previous.end)} / ${formatDate(range.start)} 〜 ${formatDate(range.end)}</span>
+        <div class="actions">
+          <label class="check-field"><input type="checkbox" checked disabled> 補助科目を表示</label>
+          <span class="book-tax">消費税 <strong>${bookState.taxMode === "taxIncluded" ? "税込" : "税抜"}</strong></span>
+          <label class="check-field"><input data-show-zero type="checkbox" ${bookState.showZero ? "checked" : ""}> 残高0円を表示</label>
         </div>
       </div>
     `;
@@ -1107,6 +1183,52 @@
     `;
   }
 
+  function renderDepartmentTable(rows, depts) {
+    return `
+      <div class="table-wrap">
+        <table class="book-table transition-table">
+          <thead>
+            <tr><th>区分</th>${depts.map((department) => `<th class="num">${esc(department)}</th>`).join("")}<th class="num">合計</th></tr>
+          </thead>
+          <tbody>
+            ${rows.map((row) => `
+              <tr class="${row.kind === "total" ? "total-row" : ""}">
+                <td style="padding-left:${row.level * 18 + 10}px;">${esc(row.label)}</td>
+                ${row.values.map((value) => `<td class="num">${yen(value)}</td>`).join("")}
+                <td class="num">${yen(row.total)}</td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  function renderComparisonTable(rows) {
+    return `
+      <div class="table-wrap">
+        <table class="book-table transition-table">
+          <thead>
+            <tr><th>区分</th><th class="num">前期</th><th class="num">構成比</th><th class="num">当期</th><th class="num">構成比</th><th class="num">増減額</th><th class="num">増減率</th></tr>
+          </thead>
+          <tbody>
+            ${rows.map((row) => `
+              <tr class="${row.kind === "total" ? "total-row" : ""}">
+                <td style="padding-left:${row.level * 18 + 10}px;">${esc(row.label)}</td>
+                <td class="num">${yen(row.previous)}</td>
+                <td class="num">${formatPercent(row.previousPercent)}</td>
+                <td class="num">${yen(row.current)}</td>
+                <td class="num">${formatPercent(row.currentPercent)}</td>
+                <td class="num">${yen(row.diff)}</td>
+                <td class="num">${formatPercent(row.diffRate)}</td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
+
   function bindBookEvents() {
     app.querySelectorAll("[data-book-tab]").forEach((button) => {
       button.addEventListener("click", () => {
@@ -1128,6 +1250,14 @@
         renderBooks();
       });
     });
+
+    const showZero = app.querySelector("[data-show-zero]");
+    if (showZero) {
+      showZero.addEventListener("change", () => {
+        bookState.showZero = showZero.checked;
+        renderBooks();
+      });
+    }
 
     const accountSelect = document.getElementById("bookAccountSelect");
     if (accountSelect) {
@@ -1170,6 +1300,7 @@
       no: data.no || nextJournalNo(),
       date: data.date || TODAY,
       debitAccount: data.debitAccount,
+      department: data.department || departments()[0],
       debitSub: data.debitSub,
       debitPartner: data.debitPartner,
       debitTax: data.debitTax,
@@ -1215,6 +1346,7 @@
         summary: item.note || item.itemName || item.vendor || "経費",
         sourceType: "経費",
         sourceId: item.id,
+        department: item.department || departments()[0],
         proof: item.proof,
         memo: item.registrationNumber ? `T番号 ${item.registrationNumber}` : ""
       }));
@@ -1238,6 +1370,7 @@
         summary: [item.content, item.invoiceNo].filter(Boolean).join(" / ") || "売上入金",
         sourceType: "売上",
         sourceId: item.id,
+        department: item.department || departments()[0],
         memo: item.note
       }));
     });
@@ -1262,6 +1395,7 @@
         summary: `${item.content || "請求"} / 未入金`,
         sourceType: "請求書",
         sourceId: item.id,
+        department: item.department || departments()[0],
         memo: fiscalCrossing(item) ? "担当税理士に確認が必要: 決算またぎ" : item.memo
       }));
     });
@@ -1286,6 +1420,7 @@
         summary: `${item.payMonth || ""} 給与`,
         sourceType: "給与",
         sourceId: item.id,
+        department: item.department || departments()[0],
         memo: item.note
       }));
     });
@@ -1307,7 +1442,8 @@
         creditAmount: item.creditAmount,
         summary: item.summary,
         sourceType: "手入力",
-        sourceId: item.id
+        sourceId: item.id,
+        department: item.department || departments()[0]
       }));
     });
 
@@ -1320,6 +1456,7 @@
       creditAmount: 0,
       debitInvoiceEligible: false,
       creditInvoiceEligible: false,
+      department: departments()[0],
       memo: "",
       ...entry
     };
@@ -1570,6 +1707,57 @@
     });
   }
 
+  function entriesForFiscalYear(year) {
+    return allBookEntries()
+      .filter((entry) => entry.date && getFiscalYear(entry.date) === year)
+      .sort((a, b) => `${a.date}-${a.no}`.localeCompare(`${b.date}-${b.no}`));
+  }
+
+  function departmentRows(entries, report, depts) {
+    const totalRows = trialRows(entries, report);
+    return totalRows
+      .map((baseRow) => {
+        const values = depts.map((department) => {
+          const row = trialRows(entries.filter((entry) => entry.department === department), report).find((item) => item.label === baseRow.label);
+          return row ? row.balance : 0;
+        });
+        return {
+          label: baseRow.label,
+          values,
+          total: baseRow.balance,
+          level: baseRow.level,
+          kind: baseRow.kind
+        };
+      })
+      .filter((row) => bookState.showZero || row.total || row.values.some(Boolean));
+  }
+
+  function comparisonRows(currentEntries, previousEntries, report) {
+    const currentRows = trialRows(currentEntries, report);
+    const previousRows = trialRows(previousEntries, report);
+    const labels = [...new Set([...previousRows.map((row) => row.label), ...currentRows.map((row) => row.label)])];
+    return labels
+      .map((label) => {
+        const current = currentRows.find((row) => row.label === label);
+        const previous = previousRows.find((row) => row.label === label);
+        const currentValue = current ? current.balance : 0;
+        const previousValue = previous ? previous.balance : 0;
+        const diff = currentValue - previousValue;
+        return {
+          label,
+          previous: previousValue,
+          previousPercent: previous ? previous.percent : null,
+          current: currentValue,
+          currentPercent: current ? current.percent : null,
+          diff,
+          diffRate: previousValue ? Math.round((diff / Math.abs(previousValue)) * 1000) / 10 : null,
+          level: current?.level ?? previous?.level ?? 0,
+          kind: current?.kind || previous?.kind || "account"
+        };
+      })
+      .filter((row) => bookState.showZero || row.previous || row.current || row.diff);
+  }
+
   function paymentAccount(method) {
     if (method === "cash") return "現金";
     if (method === "bank") return "普通預金";
@@ -1595,6 +1783,10 @@
 
   function periodTab(value, label) {
     return `<button class="tab ${bookState.period === value ? "is-active" : ""}" data-period="${esc(value)}" type="button">${esc(label)}</button>`;
+  }
+
+  function formatPercent(value) {
+    return value === null || value === undefined ? "-" : `${Number(value).toFixed(1)}%`;
   }
 
   function sourceBadge(value) {
@@ -1624,9 +1816,18 @@
         total: row.total,
         values: row.values.join(" / ")
       }))
+      : type === "department"
+        ? departmentRows(fiscalBookEntries(), bookState.report, departments()).map((row) => ({
+          label: row.label,
+          total: row.total,
+          values: row.values.join(" / ")
+        }))
+        : type === "compare"
+          ? comparisonRows(fiscalBookEntries(), entriesForFiscalYear(selectedFiscalYear - 1), bookState.report)
       : trialRows(fiscalBookEntries(), bookState.report);
     exportCsv(`books-${type}-${bookState.report}`, rows, [
-      ["label", "区分"], ["debit", "借方金額"], ["credit", "貸方金額"], ["balance", "残高"], ["percent", "構成比"], ["values", "推移"], ["total", "合計"]
+      ["label", "区分"], ["debit", "借方金額"], ["credit", "貸方金額"], ["balance", "残高"], ["percent", "構成比"], ["values", "推移"], ["total", "合計"],
+      ["previous", "前期"], ["previousPercent", "前期構成比"], ["current", "当期"], ["currentPercent", "当期構成比"], ["diff", "増減額"], ["diffRate", "増減率"]
     ]);
   }
 
@@ -1641,6 +1842,7 @@
             ${selectField("fiscalStartMonth", "決算開始月", Array.from({ length: 12 }, (_, index) => [index + 1, `${index + 1}月`]), state.settings.fiscalStartMonth)}
             <label class="field" style="grid-column:1 / -1;"><span>税理士メモ</span><textarea name="accountantMemo">${esc(state.settings.accountantMemo || "")}</textarea></label>
             <label class="field" style="grid-column:1 / -1;"><span>経費科目</span><textarea name="categories">${esc(categories().join("\n"))}</textarea></label>
+            <label class="field" style="grid-column:1 / -1;"><span>部門</span><textarea name="departments">${esc(departments().join("\n"))}</textarea></label>
             <div class="actions" style="grid-column:1 / -1;">
               <button class="button" type="submit">保存</button>
               <button class="button danger" id="clearSampleButton" type="button">全データ削除</button>
@@ -1666,6 +1868,8 @@
       state.settings.fiscalStartMonth = Number(data.fiscalStartMonth) || DEFAULT_FISCAL_START_MONTH;
       state.settings.accountantMemo = data.accountantMemo;
       state.settings.categories = data.categories.split(/\r?\n/).map(clean).filter(Boolean);
+      state.settings.departments = data.departments.split(/\r?\n/).map(clean).filter(Boolean);
+      if (!state.settings.departments.length) state.settings.departments = defaultDepartments;
       selectedFiscalYear = getFiscalYear(TODAY);
       seedFiscalOptions();
       persist();
@@ -2144,6 +2348,10 @@
 
   function categories() {
     return Array.isArray(state.settings.categories) && state.settings.categories.length ? state.settings.categories : expenseCategories;
+  }
+
+  function departments() {
+    return Array.isArray(state.settings.departments) && state.settings.departments.length ? state.settings.departments : defaultDepartments;
   }
 
   function formValues(form) {
