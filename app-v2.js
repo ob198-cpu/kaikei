@@ -133,6 +133,7 @@
       hitech: [],
       closings: [],
       journals: [],
+      trash: [],
       audit: []
     };
   }
@@ -171,6 +172,7 @@
       "hitech",
       "closings",
       "journals",
+      "trash",
       "audit"
     ].forEach((key) => {
       normalized[key] = Array.isArray(input && input[key]) ? input[key] : [];
@@ -887,10 +889,14 @@
         </div>
       </section>
 
-      <div class="grid cols-2" style="margin-top:14px;">
+      <div class="grid cols-3" style="margin-top:14px;">
         <section class="panel">
           <div class="panel-head"><h2>締め状況</h2><span class="badge">${closings.length}件</span></div>
           <div class="panel-body">${renderClosingMatrix(months, closings)}</div>
+        </section>
+        <section class="panel">
+          <div class="panel-head"><h2>月締めロック</h2><span class="badge">${lockedMonths().length}か月</span></div>
+          <div class="panel-body">${renderLockedMonthList()}</div>
         </section>
         <section class="panel">
           <div class="panel-head"><h2>提出前チェック</h2><span class="badge ${alerts.length ? "warn" : "good"}">${health.score}点</span></div>
@@ -1239,6 +1245,7 @@
     const health = getDataHealth();
     const storage = storageInfo();
     const auditRows = [...state.audit].slice(-20).reverse();
+    const trashRows = [...(state.trash || [])].slice(-30).reverse();
 
     app.innerHTML = `
       <section class="panel">
@@ -1282,12 +1289,18 @@
           <div class="panel-body">${renderAuditTable(auditRows)}</div>
         </section>
       </div>
+
+      <section class="panel" style="margin-top:14px;">
+        <div class="panel-head"><h2>削除済みデータ</h2><span class="badge">${(state.trash || []).length}件</span></div>
+        <div class="panel-body">${renderTrashTable(trashRows)}</div>
+      </section>
     `;
 
     document.getElementById("settingsForm").addEventListener("submit", handleSettingsSubmit);
     document.getElementById("settingsExportButton").addEventListener("click", exportAllData);
     document.getElementById("settingsPackageButton").addEventListener("click", exportAccountantPackage);
     document.getElementById("clearDataButton").addEventListener("click", clearAllData);
+    bindTrashActions();
   }
 
   function handleSettingsSubmit(event) {
@@ -1316,6 +1329,112 @@
     addAudit("全データ削除", {});
     persist("初期化");
     render();
+  }
+
+  function renderTrashTable(rows) {
+    if (!rows.length) return `<div class="empty">削除済みデータはありません。</div>`;
+    return `
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>削除日時</th><th>種類</th><th>日付/月</th><th>内容</th><th class="num">金額</th><th>操作</th></tr></thead>
+          <tbody>${rows.map((item) => {
+            const record = item.record || {};
+            const date = recordDate(item.collection, record);
+            return `<tr>
+              <td>${esc(formatDateTime(item.deletedAt))}</td>
+              <td>${esc(collectionLabel(item.collection))}</td>
+              <td>${esc(formatDate(date))}</td>
+              <td>${esc(recordSummary(item.collection, record))}</td>
+              <td class="num">${record.amount || record.total || record.netPay ? yen(record.amount || record.total || record.netPay) : ""}</td>
+              <td><div class="actions"><button class="button small secondary" data-trash-action="restore" data-trash-id="${esc(item.id)}" type="button">復元</button><button class="button small danger" data-trash-action="purge" data-trash-id="${esc(item.id)}" type="button">完全削除</button></div></td>
+            </tr>`;
+          }).join("")}</tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  function bindTrashActions() {
+    app.querySelectorAll("[data-trash-action='restore']").forEach((button) => {
+      button.addEventListener("click", () => restoreTrashItem(button.dataset.trashId));
+    });
+    app.querySelectorAll("[data-trash-action='purge']").forEach((button) => {
+      button.addEventListener("click", () => purgeTrashItem(button.dataset.trashId));
+    });
+  }
+
+  function restoreTrashItem(trashId) {
+    const trashItem = (state.trash || []).find((item) => item.id === trashId);
+    if (!trashItem) return;
+    const record = trashItem.record;
+    if (isMonthLocked(recordMonth(trashItem.collection, record))) {
+      alert("この月は月末締めが完了しているため、復元できません。締め状態を確認してください。");
+      return;
+    }
+    if (!Array.isArray(state[trashItem.collection])) state[trashItem.collection] = [];
+    state[trashItem.collection].push(record);
+    state.trash = state.trash.filter((item) => item.id !== trashId);
+    addAudit(`${collectionLabel(trashItem.collection)}復元`, record);
+    persist("復元");
+    renderSettings();
+  }
+
+  function purgeTrashItem(trashId) {
+    if (!confirm("削除済みデータを完全に削除します。バックアップ後に実行してください。")) return;
+    const trashItem = (state.trash || []).find((item) => item.id === trashId);
+    state.trash = (state.trash || []).filter((item) => item.id !== trashId);
+    addAudit("削除済みデータ完全削除", trashItem || { id: trashId });
+    persist("完全削除");
+    renderSettings();
+  }
+
+  function isMonthLocked(month) {
+    if (!month) return false;
+    return state.closings.some((item) => item.month === month && item.closeType === "月末" && item.status === "完了");
+  }
+
+  function lockedMonths() {
+    return fiscalMonths(selectedFiscalYear).filter((month) => isMonthLocked(month));
+  }
+
+  function recordMonth(collection, record) {
+    const date = recordDate(collection, record);
+    return date ? date.slice(0, 7) : "";
+  }
+
+  function recordDate(collection, record) {
+    if (!record) return "";
+    if (collection === "invoices") return record.serviceDate || record.issueDate || record.expectedPaymentDate || record.paymentDate || "";
+    if (collection === "payroll") return record.payDate || (record.payMonth ? `${record.payMonth}-01` : "");
+    if (collection === "closings") return record.month ? `${record.month}-01` : "";
+    return record.date || record.issueDate || record.createdAt || "";
+  }
+
+  function recordSummary(collection, record) {
+    if (!record) return "";
+    if (collection === "expenses") return [record.vendor, record.itemName, record.category].filter(Boolean).join(" / ");
+    if (collection === "sales") return [record.customer, record.content, record.invoiceNo].filter(Boolean).join(" / ");
+    if (collection === "invoices") return [record.invoiceNo, record.customer, record.content].filter(Boolean).join(" / ");
+    if (collection === "estimates") return [record.estimateNo, record.customer, record.content].filter(Boolean).join(" / ");
+    if (collection === "trips") return [record.destination, record.purpose].filter(Boolean).join(" / ");
+    if (collection === "payroll") return [record.payMonth, record.employee].filter(Boolean).join(" / ");
+    if (collection === "hitech") return [record.sender, record.instructor, record.course].filter(Boolean).join(" / ");
+    return record.note || record.id || "";
+  }
+
+  function collectionLabel(collection) {
+    const labels = {
+      expenses: "経費",
+      sales: "売上",
+      invoices: "請求書",
+      estimates: "見積",
+      trips: "出張台帳",
+      payroll: "給与台帳",
+      hitech: "ハイテク台帳",
+      closings: "締め",
+      journals: "仕訳"
+    };
+    return labels[collection] || collection;
   }
 
   function renderExpenseFilters(allExpenses) {
@@ -1592,6 +1711,18 @@
     `;
   }
 
+  function renderLockedMonthList() {
+    const months = lockedMonths();
+    if (!months.length) {
+      return `<div class="notice info">月末締めが「完了」の月はまだありません。</div>`;
+    }
+    return `
+      <div class="status-list">
+        ${months.map((month) => `<span><strong>${esc(monthLabel(month))}</strong> 編集・削除・復元をロック中</span>`).join("")}
+      </div>
+    `;
+  }
+
   function renderExpenseChecks(expenses) {
     const checks = [];
     const missingProof = expenses.filter((item) => !item.proof);
@@ -1696,10 +1827,22 @@
       button.addEventListener("click", () => {
         const collection = button.dataset.collection;
         const id = button.dataset.id;
-        if (!confirm("この行を削除します。監査ログには削除履歴を残します。")) return;
         const item = (state[collection] || []).find((record) => record.id === id);
+        if (!item) return;
+        if (isMonthLocked(recordMonth(collection, item))) {
+          alert("この月は月末締めが完了しているため、削除できません。締め状態を確認してください。");
+          return;
+        }
+        if (!confirm("この行を削除済みデータへ移動します。設定画面から復元できます。")) return;
+        state.trash = Array.isArray(state.trash) ? state.trash : [];
+        state.trash.push({
+          id: uid("trash"),
+          collection,
+          deletedAt: new Date().toISOString(),
+          record: item
+        });
         state[collection] = (state[collection] || []).filter((record) => record.id !== id);
-        addAudit(`${collection}削除`, item || { id });
+        addAudit(`${collectionLabel(collection)}削除`, item);
         persist("削除保存");
         render();
       });
@@ -1710,7 +1853,15 @@
     });
 
     app.querySelectorAll("[data-action='edit']").forEach((button) => {
-      button.addEventListener("click", () => showEditForm(button.dataset.collection, button.dataset.id));
+      button.addEventListener("click", () => {
+        const collection = button.dataset.collection;
+        const item = (state[collection] || []).find((record) => record.id === button.dataset.id);
+        if (item && isMonthLocked(recordMonth(collection, item))) {
+          alert("この月は月末締めが完了しているため、編集できません。締め状態を確認してください。");
+          return;
+        }
+        showEditForm(collection, button.dataset.id);
+      });
     });
 
     app.querySelectorAll("[data-action='preview']").forEach((button) => {
@@ -1722,6 +1873,10 @@
         const invoice = state.invoices.find((item) => item.id === button.dataset.id);
         if (!invoice) return;
         const paymentDate = invoice.paymentDate || invoice.expectedPaymentDate || TODAY;
+        if (isMonthLocked(paymentDate.slice(0, 7))) {
+          alert("入金月が月末締め完了済みのため、売上化できません。締め状態を確認してください。");
+          return;
+        }
         const sale = {
           id: uid("sale"),
           date: paymentDate,
@@ -1948,6 +2103,7 @@
       closings: state.closings.filter((item) => item.month && getFiscalYear(`${item.month}-01`) === selectedFiscalYear),
       journals: fiscalItems(state.journals, "date"),
       bookEntries: fiscalBookEntries(),
+      trash: state.trash || [],
       audit: state.audit
     };
     addAudit("税理士提出パック出力", { fiscalYear: selectedFiscalYear });
@@ -2513,7 +2669,9 @@
   }
 
   function rowActions(collection, id) {
-    return `<div class="actions"><button class="button small secondary" data-action="detail" data-collection="${esc(collection)}" data-id="${esc(id)}" type="button">詳細</button><button class="button small secondary" data-action="edit" data-collection="${esc(collection)}" data-id="${esc(id)}" type="button">編集</button><button class="button small danger" data-action="delete" data-collection="${esc(collection)}" data-id="${esc(id)}" type="button">削除</button></div>`;
+    const item = (state[collection] || []).find((record) => record.id === id);
+    const locked = item && isMonthLocked(recordMonth(collection, item));
+    return `<div class="actions"><button class="button small secondary" data-action="detail" data-collection="${esc(collection)}" data-id="${esc(id)}" type="button">詳細</button>${locked ? '<span class="badge warn">ロック中</span>' : `<button class="button small secondary" data-action="edit" data-collection="${esc(collection)}" data-id="${esc(id)}" type="button">編集</button><button class="button small danger" data-action="delete" data-collection="${esc(collection)}" data-id="${esc(id)}" type="button">削除</button>`}</div>`;
   }
 
   function paymentBadge(value) {
