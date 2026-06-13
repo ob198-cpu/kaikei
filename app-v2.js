@@ -1640,7 +1640,7 @@
               <td>${esc(item.invoiceNo)}</td><td>${esc(formatDate(item.issueDate))}</td><td>${esc(formatDate(item.serviceDate))}</td><td>${esc(formatDate(item.dueDate))}</td><td>${esc(formatDate(item.expectedPaymentDate))}</td><td>${esc(formatDate(item.paymentDate))}</td>
               <td>${esc(item.customer)}</td><td>${esc(item.content)}</td><td class="num">${yen(item.amount)}</td><td>${statusBadge(item.status)}</td>
               <td>${crossing ? '<span class="badge bad">決算またぎ</span>' : ""} ${mismatch ? '<span class="badge bad">金額差</span>' : ""}</td>
-              <td>${rowActions("invoices", item.id)} ${item.status !== "入金済" ? `<button class="button small secondary" data-action="make-sale" data-id="${esc(item.id)}" type="button">売上化</button>` : ""}</td>
+              <td>${rowActions("invoices", item.id)} <button class="button small secondary" data-action="issue-invoice" data-id="${esc(item.id)}" type="button">請求書発行</button> ${item.status !== "入金済" ? `<button class="button small secondary" data-action="make-sale" data-id="${esc(item.id)}" type="button">売上化</button>` : ""}</td>
             </tr>`;
           }).join("")}</tbody>
         </table>
@@ -1653,7 +1653,7 @@
     return `
       <div class="table-wrap"><table>
         <thead><tr><th>番号</th><th>日付</th><th>提出先</th><th>分類</th><th>部門</th><th>内容</th><th class="num">金額</th><th>状態</th><th>請求書番号</th><th>操作</th></tr></thead>
-        <tbody>${items.map((item) => `<tr><td>${esc(item.estimateNo)}</td><td>${esc(formatDate(item.date))}</td><td>${esc(item.customer)}</td><td>${esc(item.classification)}</td><td>${esc(item.department || "")}</td><td>${esc(item.content)}</td><td class="num">${yen(item.amount)}</td><td>${statusBadge(item.status)}</td><td>${esc(item.linkedInvoiceNo || "")}</td><td>${rowActions("estimates", item.id)}</td></tr>`).join("")}</tbody>
+        <tbody>${items.map((item) => `<tr><td>${esc(item.estimateNo)}</td><td>${esc(formatDate(item.date))}</td><td>${esc(item.customer)}</td><td>${esc(item.classification)}</td><td>${esc(item.department || "")}</td><td>${esc(item.content)}</td><td class="num">${yen(item.amount)}</td><td>${statusBadge(item.status)}</td><td>${esc(item.linkedInvoiceNo || "")}</td><td>${rowActions("estimates", item.id)} <button class="button small secondary" data-action="issue-estimate" data-id="${esc(item.id)}" type="button">見積書発行</button>${item.linkedInvoiceNo ? "" : ` <button class="button small secondary" data-action="estimate-to-invoice" data-id="${esc(item.id)}" type="button">請求書化</button>`}</td></tr>`).join("")}</tbody>
       </table></div>
     `;
   }
@@ -1866,6 +1866,27 @@
 
     app.querySelectorAll("[data-action='preview']").forEach((button) => {
       button.addEventListener("click", () => showDetail("expenses", button.dataset.id));
+    });
+
+    app.querySelectorAll("[data-action='issue-invoice']").forEach((button) => {
+      button.addEventListener("click", () => {
+        const invoice = state.invoices.find((item) => item.id === button.dataset.id);
+        if (invoice) exportInvoiceDocument(invoice);
+      });
+    });
+
+    app.querySelectorAll("[data-action='issue-estimate']").forEach((button) => {
+      button.addEventListener("click", () => {
+        const estimate = state.estimates.find((item) => item.id === button.dataset.id);
+        if (estimate) exportEstimateDocument(estimate);
+      });
+    });
+
+    app.querySelectorAll("[data-action='estimate-to-invoice']").forEach((button) => {
+      button.addEventListener("click", () => {
+        const estimate = state.estimates.find((item) => item.id === button.dataset.id);
+        if (estimate) createInvoiceFromEstimate(estimate);
+      });
     });
 
     app.querySelectorAll("[data-action='make-sale']").forEach((button) => {
@@ -2154,6 +2175,136 @@
     addAudit("提出サマリー出力", { fiscalYear: selectedFiscalYear });
     persist("提出サマリー");
     downloadBlob(`税理士提出サマリー-${selectedFiscalYear}年度-${TODAY}.html`, new Blob([html], { type: "text/html;charset=utf-8" }));
+  }
+
+  function exportInvoiceDocument(invoice) {
+    const html = businessDocumentHtml("invoice", invoice);
+    addAudit("請求書HTML発行", { id: invoice.id, invoiceNo: invoice.invoiceNo });
+    persist("請求書発行");
+    downloadBlob(`請求書-${safeFilePart(invoice.invoiceNo || invoice.id)}-${TODAY}.html`, new Blob([html], { type: "text/html;charset=utf-8" }));
+  }
+
+  function exportEstimateDocument(estimate) {
+    const html = businessDocumentHtml("estimate", estimate);
+    addAudit("見積書HTML発行", { id: estimate.id, estimateNo: estimate.estimateNo });
+    persist("見積書発行");
+    downloadBlob(`見積書-${safeFilePart(estimate.estimateNo || estimate.id)}-${TODAY}.html`, new Blob([html], { type: "text/html;charset=utf-8" }));
+  }
+
+  function createInvoiceFromEstimate(estimate) {
+    if (estimate.linkedInvoiceNo) {
+      alert("この見積にはすでに請求書番号が紐づいています。");
+      return;
+    }
+    if (isMonthLocked(recordMonth("estimates", estimate))) {
+      alert("この見積月は月末締めが完了しているため、請求書化できません。締め状態を確認してください。");
+      return;
+    }
+    const now = new Date().toISOString();
+    const invoiceNo = nextInvoiceNo();
+    const invoice = {
+      id: uid("inv"),
+      invoiceNo,
+      issueDate: TODAY,
+      serviceDate: estimate.date || TODAY,
+      dueDate: endOfNextMonth(TODAY),
+      expectedPaymentDate: endOfNextMonth(TODAY),
+      paymentDate: "",
+      customer: estimate.customer,
+      content: estimate.content,
+      classification: estimate.classification,
+      department: estimate.department || departments()[0],
+      amount: num(estimate.amount),
+      taxRate: "10%",
+      status: "未入金",
+      note: [`見積 ${estimate.estimateNo || ""} から作成`, estimate.note].filter(Boolean).join(" / "),
+      createdAt: now
+    };
+    state.invoices.push(invoice);
+    estimate.linkedInvoiceNo = invoiceNo;
+    estimate.status = "受注";
+    estimate.updatedAt = now;
+    addAudit("見積から請求書化", { estimateNo: estimate.estimateNo, invoiceNo });
+    persist("請求書化");
+    alert(`請求書 ${invoiceNo} を作成しました。`);
+    renderEstimates();
+  }
+
+  function businessDocumentHtml(type, record) {
+    const isInvoice = type === "invoice";
+    const title = isInvoice ? "請求書" : "見積書";
+    const number = isInvoice ? record.invoiceNo : record.estimateNo;
+    const partnerLabel = isInvoice ? "請求先" : "提出先";
+    const partner = record.customer || "";
+    const rows = isInvoice ? [
+      ["請求書番号", record.invoiceNo],
+      ["請求日", formatDate(record.issueDate)],
+      ["実施日", formatDate(record.serviceDate)],
+      ["支払期限", formatDate(record.dueDate)],
+      ["入金予定日", formatDate(record.expectedPaymentDate)],
+      ["入金日", formatDate(record.paymentDate)],
+      ["請求先", record.customer],
+      ["内容", record.content],
+      ["分類", record.classification],
+      ["部門", record.department],
+      ["税区分", record.taxRate || "未設定"],
+      ["状態", record.status],
+      ["振込先", state.settings.bankAccount || "道銀"],
+      ["税理士確認メモ", record.note]
+    ] : [
+      ["見積番号", record.estimateNo],
+      ["見積日", formatDate(record.date)],
+      ["提出先", record.customer],
+      ["内容", record.content],
+      ["分類", record.classification],
+      ["部門", record.department],
+      ["状態", record.status],
+      ["関連請求書番号", record.linkedInvoiceNo],
+      ["メモ", record.note]
+    ];
+
+    return `<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <title>${esc(title)} ${esc(number || "")}</title>
+  <style>
+    body{font-family:"Yu Gothic",Meiryo,sans-serif;background:#f3f6fa;color:#182235;margin:0;line-height:1.65}
+    .sheet{max-width:860px;margin:24px auto;background:#fff;padding:44px;border:1px solid #d7deea}
+    .top{display:flex;justify-content:space-between;gap:24px;border-bottom:3px solid #2f5f9f;padding-bottom:18px}
+    h1{font-size:32px;margin:0;letter-spacing:0}.number{font-size:14px;color:#637087;margin-top:8px}
+    .company{text-align:right}.company strong{font-size:18px}.muted{color:#637087}.partner{font-size:20px;margin:26px 0 18px}
+    table{width:100%;border-collapse:collapse;margin-top:18px}th,td{border:1px solid #d8dee8;padding:10px 12px;text-align:left;vertical-align:top}th{width:210px;background:#e8f1fb}
+    .amount{margin:28px 0;padding:18px 22px;background:#eef5ff;border-left:5px solid #2f5f9f;display:flex;justify-content:space-between;align-items:baseline}
+    .amount span{font-size:15px}.amount strong{font-size:30px}.note{margin-top:22px;padding:14px;background:#fff8e6;border:1px solid #ead8a6}
+    .actions{margin-top:22px}.button{border:1px solid #2f5f9f;background:#2f5f9f;color:#fff;border-radius:4px;padding:9px 16px;cursor:pointer}
+    @media print{body{background:#fff}.sheet{margin:0;border:0}.actions{display:none}}
+  </style>
+</head>
+<body>
+  <main class="sheet">
+    <div class="top">
+      <div>
+        <h1>${esc(title)}</h1>
+        <div class="number">${esc(number || "")}</div>
+      </div>
+      <div class="company">
+        <strong>${esc(state.settings.companyName || "CDP北海道")}</strong><br>
+        <span class="muted">出力日 ${esc(formatDate(TODAY))}</span>
+      </div>
+    </div>
+    <div class="partner">${esc(partner || partnerLabel)} 御中</div>
+    <div class="amount"><span>${esc(title)}金額</span><strong>${esc(yen(record.amount))}</strong></div>
+    <table><tbody>${rows.map(([label, value]) => `<tr><th>${esc(label)}</th><td>${esc(value || "")}</td></tr>`).join("")}</tbody></table>
+    <div class="note">
+      ${isInvoice
+        ? "請求日、実施日、支払期限、入金予定日、入金日を会計判断用に残しています。決算またぎや売上計上日は担当税理士に確認してください。"
+        : "見積書は記録として保存し、受注後は見積一覧から請求書化できます。金額や条件に変更がある場合は請求書化前に見積を編集してください。"}
+    </div>
+    <div class="actions"><button class="button" onclick="window.print()">印刷</button></div>
+  </main>
+</body>
+</html>`;
   }
 
   async function importAllData(event) {
@@ -2972,6 +3123,10 @@
 
   function csvCell(value) {
     return `"${String(value ?? "").replaceAll('"', '""')}"`;
+  }
+
+  function safeFilePart(value) {
+    return String(value || "document").replace(/[\\/:*?"<>|]/g, "_").replace(/\s+/g, "_");
   }
 
   function esc(value) {
