@@ -96,6 +96,11 @@
     taxMode: "taxExcluded",
     showZero: false
   };
+  let tableFilters = {
+    expenses: { query: "", category: "all", paymentMethod: "all", proof: "all" },
+    sales: { query: "", invoice: "all" },
+    invoices: { query: "", status: "all", due: "all" }
+  };
 
   document.addEventListener("DOMContentLoaded", init);
 
@@ -384,7 +389,8 @@
   }
 
   function renderExpenses() {
-    const expenses = fiscalItems(state.expenses, "date").sort(byDate("date"));
+    const allExpenses = fiscalItems(state.expenses, "date").sort(byDate("date"));
+    const expenses = filterExpenses(allExpenses);
     const summary = summarizeExpenses(expenses);
     const total = sum(expenses, "amount");
 
@@ -415,13 +421,16 @@
         </section>
         <section class="panel">
           <div class="panel-head"><h2>提出前チェック</h2></div>
-          <div class="panel-body">${renderExpenseChecks(expenses)}</div>
+          <div class="panel-body">${renderExpenseChecks(allExpenses)}</div>
         </section>
       </div>
 
       <section class="panel" style="margin-top:14px;">
-        <div class="panel-head"><h2>経費一覧</h2><span class="badge">${expenses.length}件</span></div>
-        <div class="panel-body">${renderExpenseTable(expenses)}</div>
+        <div class="panel-head"><h2>経費一覧</h2><span class="badge">${expenses.length} / ${allExpenses.length}件</span></div>
+        <div class="panel-body">
+          ${renderExpenseFilters(allExpenses)}
+          ${renderExpenseTable(expenses)}
+        </div>
       </section>
     `;
 
@@ -431,6 +440,7 @@
       ["quantity", "個数"], ["unitPrice", "単価"], ["amount", "金額"], ["paymentMethod", "支払区分"],
       ["taxRate", "税区分"], ["registrationNumber", "T番号"], ["invoiceEligible", "インボイス適格"], ["note", "摘要"]
     ]));
+    bindFilterControls("expenses");
     bindTableActions();
   }
 
@@ -499,7 +509,8 @@
   }
 
   function renderSales() {
-    const sales = fiscalItems(state.sales, "date").sort(byDate("date"));
+    const allSales = fiscalItems(state.sales, "date").sort(byDate("date"));
+    const sales = filterSales(allSales);
     let cumulative = 0;
     const rows = sales.map((sale) => {
       cumulative += num(sale.amount);
@@ -531,8 +542,11 @@
         </div>
       </section>
       <section class="panel" style="margin-top:14px;">
-        <div class="panel-head"><h2>売上一覧</h2><span class="badge">${yen(sum(sales, "amount"))}</span></div>
-        <div class="panel-body">${renderSalesTable(rows)}</div>
+        <div class="panel-head"><h2>売上一覧</h2><span class="badge">${yen(sum(sales, "amount"))} / ${sales.length}件</span></div>
+        <div class="panel-body">
+          ${renderSalesFilters(allSales)}
+          ${renderSalesTable(rows)}
+        </div>
       </section>
     `;
 
@@ -542,6 +556,7 @@
       ["date", "入金日"], ["customer", "取引先"], ["content", "項目"], ["classification", "分類"],
       ["department", "部門"], ["amount", "売上額"], ["invoiceNo", "請求書番号"], ["bankAccount", "通帳"], ["note", "メモ"]
     ]));
+    bindFilterControls("sales");
     bindTableActions();
   }
 
@@ -569,7 +584,8 @@
   }
 
   function renderInvoices() {
-    const invoices = fiscalInvoices().sort(byDate("issueDate"));
+    const allInvoices = fiscalInvoices().sort(byDate("issueDate"));
+    const invoices = filterInvoices(allInvoices);
     const issues = getInvoiceIssues();
 
     app.innerHTML = `
@@ -599,10 +615,14 @@
         </div>
       </section>
 
-      <div class="grid cols-2" style="margin-top:14px;">
+      <div class="grid cols-3" style="margin-top:14px;">
         <section class="panel">
           <div class="panel-head"><h2>請求・売上照合</h2><span class="badge ${issues.length ? "warn" : "good"}">${issues.length}件</span></div>
           <div class="panel-body">${issues.length ? `<div class="alert-list">${issues.map(renderAlert).join("")}</div>` : `<div class="notice info">請求書と売上の大きなずれはありません。</div>`}</div>
+        </section>
+        <section class="panel">
+          <div class="panel-head"><h2>未収・回収予定</h2><span class="badge">${yen(sum(unpaidInvoices(allInvoices), "amount"))}</span></div>
+          <div class="panel-body">${renderReceivableAging(allInvoices)}</div>
         </section>
         <section class="panel">
           <div class="panel-head"><h2>会計判断メモ</h2><span class="badge warn">税理士確認</span></div>
@@ -616,8 +636,11 @@
       </div>
 
       <section class="panel" style="margin-top:14px;">
-        <div class="panel-head"><h2>請求書一覧</h2><span class="badge">${yen(sum(invoices, "amount"))}</span></div>
-        <div class="panel-body">${renderInvoiceTable(invoices)}</div>
+        <div class="panel-head"><h2>請求書一覧</h2><span class="badge">${yen(sum(invoices, "amount"))} / ${invoices.length}件</span></div>
+        <div class="panel-body">
+          ${renderInvoiceFilters(allInvoices)}
+          ${renderInvoiceTable(invoices)}
+        </div>
       </section>
     `;
 
@@ -627,6 +650,7 @@
       ["expectedPaymentDate", "入金予定日"], ["paymentDate", "入金日"], ["customer", "請求先"], ["content", "内容"],
       ["classification", "分類"], ["department", "部門"], ["amount", "金額"], ["status", "状態"], ["note", "確認メモ"]
     ]));
+    bindFilterControls("invoices");
     bindTableActions();
   }
 
@@ -1294,6 +1318,163 @@
     render();
   }
 
+  function renderExpenseFilters(allExpenses) {
+    const filter = tableFilters.expenses;
+    return `
+      <div class="filter-bar">
+        ${field("expenseQuery", "検索", "search", filter.query, "取引先・品名・摘要")}
+        ${selectField("expenseCategory", "科目", [["all", "全て"], ...categories().map((item) => [item, item])], filter.category)}
+        ${selectField("expensePayment", "支払", [["all", "全て"], ...paymentMethods], filter.paymentMethod)}
+        ${selectField("expenseProof", "証憑", [["all", "全て"], ["missing", "未添付"], ["attached", "添付済"]], filter.proof)}
+        <button class="button secondary small" data-filter-apply="expenses" type="button">反映</button>
+        <button class="button secondary small" data-filter-reset="expenses" type="button">クリア</button>
+        <span class="badge">${allExpenses.length}件中</span>
+      </div>
+    `;
+  }
+
+  function renderSalesFilters(allSales) {
+    const filter = tableFilters.sales;
+    return `
+      <div class="filter-bar">
+        ${field("salesQuery", "検索", "search", filter.query, "取引先・内容・請求番号")}
+        ${selectField("salesInvoice", "請求書番号", [["all", "全て"], ["linked", "あり"], ["missing", "なし"]], filter.invoice)}
+        <button class="button secondary small" data-filter-apply="sales" type="button">反映</button>
+        <button class="button secondary small" data-filter-reset="sales" type="button">クリア</button>
+        <span class="badge">${allSales.length}件中</span>
+      </div>
+    `;
+  }
+
+  function renderInvoiceFilters(allInvoices) {
+    const filter = tableFilters.invoices;
+    return `
+      <div class="filter-bar">
+        ${field("invoiceQuery", "検索", "search", filter.query, "請求先・内容・請求番号")}
+        ${selectField("invoiceStatus", "状態", [["all", "全て"], ...invoiceStatuses.map((item) => [item, item])], filter.status)}
+        ${selectField("invoiceDue", "期限", [["all", "全て"], ["overdue", "期限超過"], ["next30", "30日以内"], ["unpaid", "未入金"]], filter.due)}
+        <button class="button secondary small" data-filter-apply="invoices" type="button">反映</button>
+        <button class="button secondary small" data-filter-reset="invoices" type="button">クリア</button>
+        <span class="badge">${allInvoices.length}件中</span>
+      </div>
+    `;
+  }
+
+  function bindFilterControls(type) {
+    const reset = app.querySelector(`[data-filter-reset="${type}"]`);
+    const apply = app.querySelector(`[data-filter-apply="${type}"]`);
+    if (type === "expenses") {
+      const query = app.querySelector("[name='expenseQuery']");
+      const category = app.querySelector("[name='expenseCategory']");
+      const payment = app.querySelector("[name='expensePayment']");
+      const proof = app.querySelector("[name='expenseProof']");
+      const update = () => {
+        tableFilters.expenses = { query: query.value, category: category.value, paymentMethod: payment.value, proof: proof.value };
+        renderExpenses();
+      };
+      [category, payment, proof].forEach((control) => control && control.addEventListener("change", update));
+      if (apply) apply.addEventListener("click", update);
+      if (query) query.addEventListener("keydown", (event) => { if (event.key === "Enter") update(); });
+    }
+    if (type === "sales") {
+      const query = app.querySelector("[name='salesQuery']");
+      const invoice = app.querySelector("[name='salesInvoice']");
+      const update = () => {
+        tableFilters.sales = { query: query.value, invoice: invoice.value };
+        renderSales();
+      };
+      if (invoice) invoice.addEventListener("change", update);
+      if (apply) apply.addEventListener("click", update);
+      if (query) query.addEventListener("keydown", (event) => { if (event.key === "Enter") update(); });
+    }
+    if (type === "invoices") {
+      const query = app.querySelector("[name='invoiceQuery']");
+      const status = app.querySelector("[name='invoiceStatus']");
+      const due = app.querySelector("[name='invoiceDue']");
+      const update = () => {
+        tableFilters.invoices = { query: query.value, status: status.value, due: due.value };
+        renderInvoices();
+      };
+      [status, due].forEach((control) => control && control.addEventListener("change", update));
+      if (apply) apply.addEventListener("click", update);
+      if (query) query.addEventListener("keydown", (event) => { if (event.key === "Enter") update(); });
+    }
+    if (reset) {
+      reset.addEventListener("click", () => {
+        if (type === "expenses") tableFilters.expenses = { query: "", category: "all", paymentMethod: "all", proof: "all" };
+        if (type === "sales") tableFilters.sales = { query: "", invoice: "all" };
+        if (type === "invoices") tableFilters.invoices = { query: "", status: "all", due: "all" };
+        render();
+      });
+    }
+  }
+
+  function filterExpenses(items) {
+    const filter = tableFilters.expenses;
+    return items.filter((item) => {
+      if (filter.category !== "all" && item.category !== filter.category) return false;
+      if (filter.paymentMethod !== "all" && item.paymentMethod !== filter.paymentMethod) return false;
+      if (filter.proof === "missing" && item.proof) return false;
+      if (filter.proof === "attached" && !item.proof) return false;
+      return matchesQuery(item, filter.query, ["date", "vendor", "category", "department", "itemName", "amount", "paymentMethod", "registrationNumber", "note"]);
+    });
+  }
+
+  function filterSales(items) {
+    const filter = tableFilters.sales;
+    return items.filter((item) => {
+      if (filter.invoice === "linked" && !item.invoiceNo) return false;
+      if (filter.invoice === "missing" && item.invoiceNo) return false;
+      return matchesQuery(item, filter.query, ["date", "customer", "content", "classification", "department", "amount", "invoiceNo", "bankAccount", "note"]);
+    });
+  }
+
+  function filterInvoices(items) {
+    const filter = tableFilters.invoices;
+    const today = new Date(TODAY);
+    return items.filter((item) => {
+      if (filter.status !== "all" && item.status !== filter.status) return false;
+      if (filter.due === "unpaid" && item.status === "入金済") return false;
+      if (filter.due === "overdue" && !(item.status !== "入金済" && item.dueDate && new Date(item.dueDate) < today)) return false;
+      if (filter.due === "next30") {
+        const due = item.dueDate && new Date(item.dueDate);
+        const day = due ? daysBetween(TODAY, item.dueDate) : 999;
+        if (!(item.status !== "入金済" && due >= today && day <= 30)) return false;
+      }
+      return matchesQuery(item, filter.query, ["invoiceNo", "issueDate", "serviceDate", "dueDate", "expectedPaymentDate", "paymentDate", "customer", "content", "classification", "department", "amount", "status", "note"]);
+    });
+  }
+
+  function matchesQuery(item, query, keys) {
+    const words = clean(query).toLowerCase().split(/\s+/).filter(Boolean);
+    if (!words.length) return true;
+    const haystack = keys.map((key) => displayValue(key, item[key])).join(" ").toLowerCase();
+    return words.every((word) => haystack.includes(word));
+  }
+
+  function unpaidInvoices(invoices) {
+    return invoices.filter((invoice) => invoice.status !== "入金済");
+  }
+
+  function renderReceivableAging(invoices) {
+    const today = new Date(TODAY);
+    const rows = [
+      { label: "期限超過", items: unpaidInvoices(invoices).filter((invoice) => invoice.dueDate && new Date(invoice.dueDate) < today), cls: "bad" },
+      { label: "30日以内", items: unpaidInvoices(invoices).filter((invoice) => {
+        if (!invoice.dueDate) return false;
+        const due = new Date(invoice.dueDate);
+        return due >= today && daysBetween(TODAY, invoice.dueDate) <= 30;
+      }), cls: "warn" },
+      { label: "予定あり", items: unpaidInvoices(invoices).filter((invoice) => invoice.dueDate && new Date(invoice.dueDate) >= today), cls: "good" },
+      { label: "期限未入力", items: unpaidInvoices(invoices).filter((invoice) => !invoice.dueDate), cls: "warn" }
+    ];
+    return `
+      <div class="mini-metrics">
+        ${rows.map((row) => `<div><strong>${yen(sum(row.items, "amount"))}</strong><span class="${row.cls}">${esc(row.label)} ${row.items.length}件</span></div>`).join("")}
+      </div>
+    `;
+  }
+
   function renderExpenseTable(items) {
     if (!items.length) return `<div class="empty">経費データはありません。</div>`;
     return `
@@ -1417,10 +1598,12 @@
     const missingRegistration = expenses.filter((item) => num(item.amount) >= 10000 && item.invoiceEligible && !isValidRegistration(item.registrationNumber));
     const uncategorized = expenses.filter((item) => item.category === "未分類");
     const cardNoProof = expenses.filter((item) => item.paymentMethod === "card" && !item.proof);
+    const duplicates = duplicateExpenseGroups(expenses);
     if (missingProof.length) checks.push({ severity: "warn", title: "証憑未添付", body: `${missingProof.length}件あります。税理士提出前に画像/PDFを確認してください。` });
     if (missingRegistration.length) checks.push({ severity: "bad", title: "T番号要確認", body: `${missingRegistration.length}件あります。1万円以上・適格のものは担当税理士に確認が必要。` });
     if (uncategorized.length) checks.push({ severity: "warn", title: "未分類", body: `${uncategorized.length}件あります。税理士の分け方に合わせて科目を確認してください。` });
     if (cardNoProof.length) checks.push({ severity: "warn", title: "カード証憑不足", body: `${cardNoProof.length}件あります。カード明細だけでなく領収書の有無を確認してください。` });
+    if (duplicates.length) checks.push({ severity: "warn", title: "経費重複の疑い", body: `${duplicates.length}組あります。同じ日付・取引先・金額の二重登録を確認してください。` });
     if (!checks.length) return `<div class="notice info">経費表の提出前チェックは通っています。</div>`;
     return `<div class="alert-list">${checks.map(renderAlert).join("")}</div>`;
   }
@@ -1442,11 +1625,24 @@
     const missingRegistration = expenses.filter((item) => num(item.amount) >= 10000 && item.invoiceEligible && !isValidRegistration(item.registrationNumber));
     const invalidRegistration = expenses.filter((item) => item.registrationNumber && !isValidRegistration(item.registrationNumber));
     const unclassified = expenses.filter((item) => item.category === "未分類");
+    const duplicates = duplicateExpenseGroups(expenses);
     if (missingProof.length) alerts.push({ severity: "warn", title: "証憑未添付", body: `${missingProof.length}件の経費に画像またはPDFがありません。` });
     if (missingRegistration.length) alerts.push({ severity: "bad", title: "T番号確認", body: `${missingRegistration.length}件が1万円以上・適格・T番号未入力です。担当税理士に確認が必要。` });
     if (invalidRegistration.length) alerts.push({ severity: "bad", title: "T番号形式不一致", body: `${invalidRegistration.length}件あります。T + 13桁で入力してください。` });
     if (unclassified.length) alerts.push({ severity: "warn", title: "経費科目未分類", body: `${unclassified.length}件あります。` });
+    if (duplicates.length) alerts.push({ severity: "warn", title: "経費重複確認", body: `${duplicates.length}組あります。同じ日付・取引先・金額の登録を確認してください。` });
     return alerts;
+  }
+
+  function duplicateExpenseGroups(expenses) {
+    const groups = expenses.reduce((acc, item) => {
+      const key = [item.date, clean(item.vendor).toLowerCase(), num(item.amount)].join("|");
+      if (!item.date || !item.vendor || !num(item.amount)) return acc;
+      acc[key] = acc[key] || [];
+      acc[key].push(item);
+      return acc;
+    }, {});
+    return Object.values(groups).filter((items) => items.length > 1);
   }
 
   function getInvoiceIssues() {
