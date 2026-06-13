@@ -859,6 +859,7 @@
       ["date", "日付"], ["vendor", "取引先"], ["category", "経費科目"], ["department", "部門"], ["itemName", "品名"],
       ["amount", "金額"], ["taxRate", "税区分"], ["registrationNumber", "T番号"], ["invoiceEligible", "インボイス適格"], ["note", "摘要"]
     ]));
+    bindMonthlyHandoffActions();
     bindTableActions();
   }
 
@@ -911,6 +912,7 @@
     document.getElementById("exportClosingCsv").addEventListener("click", () => exportCsv("closings", closings, [
       ["month", "対象月"], ["closeType", "締め"], ["status", "状態"], ["note", "メモ"], ["createdAt", "登録日時"]
     ]));
+    bindMonthlyHandoffActions();
   }
 
   function handleClosingSubmit(event) {
@@ -1675,7 +1677,7 @@
       <div class="receipt-month" style="margin-bottom:14px;">
         <div class="receipt-month-head">
           <h3>${esc(monthLabel(month))}</h3>
-          <div class="actions"><span class="badge">${sorted.length}件</span><span class="badge">${yen(sum(sorted, "amount"))}</span></div>
+          <div class="actions"><span class="badge">${sorted.length}件</span><span class="badge">${yen(sum(sorted, "amount"))}</span><button class="button secondary small" data-action="month-handoff" data-month="${esc(month)}" type="button">提出HTML</button></div>
         </div>
         <div class="receipt-list">
           ${sorted.map((item) => `
@@ -1700,11 +1702,11 @@
     return `
       <div class="table-wrap">
         <table>
-          <thead><tr><th>月</th><th>15日前後</th><th>月末</th><th>メモ</th></tr></thead>
+          <thead><tr><th>月</th><th>15日前後</th><th>月末</th><th>メモ</th><th>提出</th></tr></thead>
           <tbody>${months.map((month) => {
             const mid = closings.find((item) => item.month === month && item.closeType === "15日前後");
             const end = closings.find((item) => item.month === month && item.closeType === "月末");
-            return `<tr><td>${esc(month)}</td><td>${mid ? statusBadge(mid.status) : '<span class="badge warn">未</span>'}</td><td>${end ? statusBadge(end.status) : '<span class="badge warn">未</span>'}</td><td>${esc([mid && mid.note, end && end.note].filter(Boolean).join(" / "))}</td></tr>`;
+            return `<tr><td>${esc(month)}</td><td>${mid ? statusBadge(mid.status) : '<span class="badge warn">未</span>'}</td><td>${end ? statusBadge(end.status) : '<span class="badge warn">未</span>'}</td><td>${esc([mid && mid.note, end && end.note].filter(Boolean).join(" / "))}</td><td><button class="button secondary small" data-action="month-handoff" data-month="${esc(month)}" type="button">提出HTML</button></td></tr>`;
           }).join("")}</tbody>
         </table>
       </div>
@@ -1819,7 +1821,14 @@
         renderReceipts();
       });
     });
+    bindMonthlyHandoffActions();
     bindTableActions();
+  }
+
+  function bindMonthlyHandoffActions() {
+    app.querySelectorAll("[data-action='month-handoff']").forEach((button) => {
+      button.addEventListener("click", () => exportMonthlyHandoff(button.dataset.month));
+    });
   }
 
   function bindTableActions() {
@@ -2175,6 +2184,138 @@
     addAudit("提出サマリー出力", { fiscalYear: selectedFiscalYear });
     persist("提出サマリー");
     downloadBlob(`税理士提出サマリー-${selectedFiscalYear}年度-${TODAY}.html`, new Blob([html], { type: "text/html;charset=utf-8" }));
+  }
+
+  function exportMonthlyHandoff(month) {
+    if (!month) return;
+    const data = monthlyHandoffData(month);
+    const html = monthlyHandoffHtml(data);
+    addAudit("月次提出HTML出力", {
+      month,
+      expenses: data.expenses.length,
+      sales: data.sales.length,
+      invoices: data.invoices.length,
+      issues: data.issues.length
+    });
+    persist("月次提出HTML");
+    downloadBlob(`月次提出-${safeFilePart(month)}-${TODAY}.html`, new Blob([html], { type: "text/html;charset=utf-8" }));
+  }
+
+  function monthlyHandoffData(month) {
+    const inMonth = (date) => String(date || "").slice(0, 7) === month;
+    const expenses = state.expenses.filter((item) => inMonth(item.date)).sort(byDate("date"));
+    const sales = state.sales.filter((item) => inMonth(item.date)).sort(byDate("date"));
+    const invoices = state.invoices
+      .filter((item) => [item.issueDate, item.serviceDate, item.dueDate, item.expectedPaymentDate, item.paymentDate].some(inMonth))
+      .sort(byDate("issueDate"));
+    const estimates = state.estimates.filter((item) => inMonth(item.date)).sort(byDate("date"));
+    const closings = state.closings.filter((item) => item.month === month);
+    const paymentRows = paymentMethods.map(([key, label]) => {
+      const rows = expenses.filter((item) => item.paymentMethod === key);
+      return { key, label, count: rows.length, amount: sum(rows, "amount") };
+    });
+    const data = { month, expenses, sales, invoices, estimates, closings, paymentRows };
+    data.issues = monthlyHandoffIssues(data);
+    return data;
+  }
+
+  function monthlyHandoffIssues(data) {
+    const issues = [];
+    const missingProof = data.expenses.filter((item) => !item.proof);
+    const missingRegistration = data.expenses.filter((item) => num(item.amount) >= 10000 && item.invoiceEligible && !isValidRegistration(item.registrationNumber));
+    const duplicates = duplicateExpenseGroups(data.expenses);
+    const midClosed = data.closings.some((item) => item.closeType === "15日前後" && item.status === "完了");
+    const monthClosed = data.closings.some((item) => item.closeType === "月末" && item.status === "完了");
+
+    if (!midClosed) issues.push({ severity: "warn", title: "15日前後の締め未完了", body: "中間締めの確認状況を残してください。" });
+    if (!monthClosed) issues.push({ severity: "warn", title: "月末締め未完了", body: "月末締めが完了していない月です。" });
+    if (missingProof.length) issues.push({ severity: "warn", title: "証憑未添付", body: `${missingProof.length}件あります。画像/PDFを確認してください。` });
+    if (missingRegistration.length) issues.push({ severity: "bad", title: "T番号要確認", body: `${missingRegistration.length}件あります。1万円以上・適格のものは担当税理士に確認が必要。` });
+    if (duplicates.length) issues.push({ severity: "warn", title: "経費重複の疑い", body: `${duplicates.length}組あります。同じ日付・取引先・金額を確認してください。` });
+
+    data.invoices.forEach((invoice) => {
+      const sale = findSaleForInvoice(invoice);
+      if (!invoice.serviceDate) issues.push({ severity: "warn", title: `実施日未入力 ${invoice.invoiceNo}`, body: "決算またぎ判断のため実施日を残してください。" });
+      if (invoice.status === "入金済" && !sale) issues.push({ severity: "warn", title: `売上未照合 ${invoice.invoiceNo}`, body: "入金済みですが売上一覧に同じ請求書番号がありません。" });
+      if (sale && num(sale.amount) !== num(invoice.amount)) issues.push({ severity: "bad", title: `金額差 ${invoice.invoiceNo}`, body: `請求 ${yen(invoice.amount)} / 売上 ${yen(sale.amount)}。` });
+      if (fiscalCrossing(invoice)) issues.push({ severity: "bad", title: `決算またぎ ${invoice.invoiceNo}`, body: "実施日と入金予定/入金日が別年度です。担当税理士に確認が必要。" });
+    });
+
+    return issues;
+  }
+
+  function monthlyHandoffHtml(data) {
+    const expenseTotal = sum(data.expenses, "amount");
+    const salesTotal = sum(data.sales, "amount");
+    const invoiceTotal = sum(data.invoices, "amount");
+    const proofCount = data.expenses.filter((item) => item.proof).length;
+    const range = getFiscalRange(selectedFiscalYear);
+
+    return `<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <title>月次提出 ${esc(monthLabel(data.month))}</title>
+  <style>
+    body{font-family:"Yu Gothic",Meiryo,sans-serif;color:#182235;margin:28px;line-height:1.55}
+    h1{font-size:24px;margin:0}h2{font-size:17px;margin:26px 0 8px;border-bottom:2px solid #2f5f9f;padding-bottom:4px}
+    .muted{color:#637087}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:16px}.card{border:1px solid #d8dee8;background:#f7f9fc;padding:12px}.card strong{display:block;font-size:20px}
+    table{width:100%;border-collapse:collapse;margin-top:10px}th,td{border:1px solid #d8dee8;padding:7px;text-align:left;vertical-align:top}th{background:#e8f1fb}.num{text-align:right;white-space:nowrap}
+    .bad{color:#b73838;font-weight:700}.warn{color:#b56b00;font-weight:700}.good{color:#217346;font-weight:700}
+    .proof-img{max-width:130px;max-height:100px;object-fit:cover;border:1px solid #d8dee8}.missing{color:#b56b00;font-weight:700}
+    .issue{padding:8px 10px;border:1px solid #ead8a6;background:#fff8e6;margin:6px 0}.issue.bad{border-color:#efb8b8;background:#fff0f0}
+    @media print{body{margin:12mm}.grid{grid-template-columns:repeat(2,1fr)}}
+  </style>
+</head>
+<body>
+  <h1>${esc(state.settings.companyName)} 月次提出 ${esc(monthLabel(data.month))}</h1>
+  <p class="muted">${selectedFiscalYear}年度 ${formatDate(range.start)} - ${formatDate(range.end)} / 出力日 ${formatDate(TODAY)}</p>
+  <div class="grid">
+    <div class="card"><span>経費</span><strong>${esc(yen(expenseTotal))}</strong><span>${data.expenses.length}件</span></div>
+    <div class="card"><span>証憑添付</span><strong>${proofCount}/${data.expenses.length}</strong><span>${data.expenses.length - proofCount}件未添付</span></div>
+    <div class="card"><span>売上入金</span><strong>${esc(yen(salesTotal))}</strong><span>${data.sales.length}件</span></div>
+    <div class="card"><span>請求書</span><strong>${esc(yen(invoiceTotal))}</strong><span>${data.invoices.length}件</span></div>
+  </div>
+
+  <h2>提出前確認</h2>
+  ${data.issues.length ? data.issues.map((issue) => `<div class="issue ${issue.severity === "bad" ? "bad" : ""}"><strong class="${issue.severity === "bad" ? "bad" : "warn"}">${esc(issue.title)}</strong><br>${esc(issue.body)}</div>`).join("") : `<p class="good">この月の大きな未確認はありません。</p>`}
+
+  <h2>支払区分</h2>
+  <table><thead><tr><th>区分</th><th class="num">件数</th><th class="num">金額</th></tr></thead><tbody>
+    ${data.paymentRows.map((row) => `<tr><td>${esc(row.label)}</td><td class="num">${row.count}</td><td class="num">${esc(yen(row.amount))}</td></tr>`).join("")}
+  </tbody></table>
+
+  <h2>経費・証憑</h2>
+  ${data.expenses.length ? `<table><thead><tr><th>日付</th><th>支払</th><th>取引先/品名</th><th>科目</th><th class="num">金額</th><th>T番号</th><th>証憑</th></tr></thead><tbody>${data.expenses.map((item) => `
+    <tr>
+      <td>${esc(formatDate(item.date))}</td><td>${esc(paymentLabel(item.paymentMethod))}</td><td>${esc([item.vendor, item.itemName].filter(Boolean).join(" / "))}</td>
+      <td>${esc(item.category || "")}</td><td class="num">${esc(yen(item.amount))}</td><td>${esc(item.registrationNumber || "")}</td><td>${handoffProofCell(item)}</td>
+    </tr>`).join("")}</tbody></table>` : `<p class="muted">この月の経費はありません。</p>`}
+
+  <h2>売上入金</h2>
+  ${data.sales.length ? `<table><thead><tr><th>入金日</th><th>取引先</th><th>内容</th><th>請求書番号</th><th class="num">金額</th></tr></thead><tbody>${data.sales.map((item) => `<tr><td>${esc(formatDate(item.date))}</td><td>${esc(item.customer || "")}</td><td>${esc(item.content || "")}</td><td>${esc(item.invoiceNo || "")}</td><td class="num">${esc(yen(item.amount))}</td></tr>`).join("")}</tbody></table>` : `<p class="muted">この月の売上入金はありません。</p>`}
+
+  <h2>請求書・見積</h2>
+  ${data.invoices.length ? `<table><thead><tr><th>番号</th><th>請求日</th><th>実施日</th><th>請求先</th><th>状態</th><th class="num">金額</th></tr></thead><tbody>${data.invoices.map((item) => `<tr><td>${esc(item.invoiceNo || "")}</td><td>${esc(formatDate(item.issueDate))}</td><td>${esc(formatDate(item.serviceDate))}</td><td>${esc(item.customer || "")}</td><td>${esc(item.status || "")}</td><td class="num">${esc(yen(item.amount))}</td></tr>`).join("")}</tbody></table>` : `<p class="muted">この月に関係する請求書はありません。</p>`}
+  ${data.estimates.length ? `<table><thead><tr><th>見積番号</th><th>見積日</th><th>提出先</th><th>状態</th><th>請求書番号</th><th class="num">金額</th></tr></thead><tbody>${data.estimates.map((item) => `<tr><td>${esc(item.estimateNo || "")}</td><td>${esc(formatDate(item.date))}</td><td>${esc(item.customer || "")}</td><td>${esc(item.status || "")}</td><td>${esc(item.linkedInvoiceNo || "")}</td><td class="num">${esc(yen(item.amount))}</td></tr>`).join("")}</tbody></table>` : ""}
+
+  <h2>締め状況</h2>
+  ${data.closings.length ? `<table><thead><tr><th>締め</th><th>状態</th><th>メモ</th><th>登録日時</th></tr></thead><tbody>${data.closings.map((item) => `<tr><td>${esc(item.closeType)}</td><td>${esc(item.status)}</td><td>${esc(item.note || "")}</td><td>${esc(formatDateTime(item.createdAt))}</td></tr>`).join("")}</tbody></table>` : `<p class="warn">この月の締め登録はありません。</p>`}
+  <p class="muted">このHTMLは月次確認用です。決算またぎ、売上計上日、T番号、インボイス適格性は担当税理士に確認してください。</p>
+</body>
+</html>`;
+  }
+
+  function handoffProofCell(item) {
+    const proof = item.proof;
+    if (!proof) return `<span class="missing">未添付</span>`;
+    if (proof.type && proof.type.startsWith("image/")) {
+      return `<img class="proof-img" src="${esc(proof.dataUrl)}" alt="${esc(proof.name || "証憑")}">`;
+    }
+    if (proof.dataUrl) {
+      return `<a href="${esc(proof.dataUrl)}" download="${esc(proof.name || "proof")}">${esc(proof.name || "添付ファイル")}</a>`;
+    }
+    return esc(proof.name || "添付ファイル");
   }
 
   function exportInvoiceDocument(invoice) {
