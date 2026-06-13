@@ -594,6 +594,54 @@ tr:last-child td {
   background: linear-gradient(90deg, var(--nav), var(--accent));
 }
 
+.progress-line {
+  margin-bottom: 12px;
+}
+
+.health-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.health-grid div {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f7f9fc;
+  padding: 10px;
+}
+
+.health-grid strong,
+.health-grid span,
+.status-list span,
+.check-list span {
+  display: block;
+}
+
+.health-grid strong {
+  font-size: 18px;
+}
+
+.health-grid span,
+.status-list span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.status-list,
+.check-list {
+  display: grid;
+  gap: 8px;
+}
+
+.status-list span,
+.check-list span {
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
 .detail-list {
   display: grid;
   grid-template-columns: 160px 1fr;
@@ -702,6 +750,10 @@ dialog::backdrop {
 @media (max-width: 1100px) {
   .grid.cols-4,
   .grid.cols-3 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .health-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 

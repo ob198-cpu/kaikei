@@ -14,7 +14,7 @@
           <span class="brand-mark">C</span>
           <div>
             <strong>CDP会計</strong>
-            <small>顧客管理と分離</small>
+            <small>税理士提出用</small>
           </div>
         </div>
         <nav class="nav" aria-label="会計メニュー">
@@ -33,7 +33,7 @@
           <button class="nav-item" data-view="settings" type="button">設定</button>
         </nav>
         <div class="sidebar-footer">
-          <small>ローカル保存</small>
+          <small>ブラウザ保存</small>
           <small id="saveStatus">未保存</small>
         </div>
       </aside>
@@ -42,16 +42,16 @@
         <header class="topbar">
           <div>
             <h1 id="pageTitle">ホーム</h1>
-            <p id="pageSubtitle">2026年度 2026/06/01 - 2027/05/31</p>
+            <p id="pageSubtitle">会計年度を選択してください</p>
           </div>
           <div class="topbar-actions">
             <label class="field compact">
               <span>年度</span>
               <select id="fiscalYearSelect"></select>
             </label>
-            <button class="button ghost" id="exportAllButton" type="button">全体エクスポート</button>
+            <button class="button ghost" id="exportAllButton" type="button">全体バックアップ</button>
             <label class="button ghost file-button">
-              インポート
+              復元
               <input id="importAllInput" type="file" accept="application/json">
             </label>
           </div>
@@ -69,6 +69,6 @@
       <div id="dialogBody"></div>
     </dialog>
 
-    <script src="app.js"></script>
+    <script src="app-v2.js"></script>
   </body>
 </html>
