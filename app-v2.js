@@ -134,6 +134,7 @@
       closings: [],
       journals: [],
       trash: [],
+      handoffs: [],
       audit: []
     };
   }
@@ -173,6 +174,7 @@
       "closings",
       "journals",
       "trash",
+      "handoffs",
       "audit"
     ].forEach((key) => {
       normalized[key] = Array.isArray(input && input[key]) ? input[key] : [];
@@ -904,6 +906,11 @@
           <div class="panel-body">${alerts.length ? `<div class="alert-list">${alerts.map(renderAlert).join("")}</div>` : `<div class="notice info">提出前の未確認はありません。</div>`}</div>
         </section>
       </div>
+
+      <section class="panel" style="margin-top:14px;">
+        <div class="panel-head"><h2>月次提出履歴</h2><span class="badge">${fiscalHandoffs().length}件</span></div>
+        <div class="panel-body">${renderMonthlyHandoffHistory(months)}</div>
+      </section>
     `;
 
     document.getElementById("closingForm").addEventListener("submit", handleClosingSubmit);
@@ -1706,10 +1713,28 @@
           <tbody>${months.map((month) => {
             const mid = closings.find((item) => item.month === month && item.closeType === "15日前後");
             const end = closings.find((item) => item.month === month && item.closeType === "月末");
-            return `<tr><td>${esc(month)}</td><td>${mid ? statusBadge(mid.status) : '<span class="badge warn">未</span>'}</td><td>${end ? statusBadge(end.status) : '<span class="badge warn">未</span>'}</td><td>${esc([mid && mid.note, end && end.note].filter(Boolean).join(" / "))}</td><td><button class="button secondary small" data-action="month-handoff" data-month="${esc(month)}" type="button">提出HTML</button></td></tr>`;
+            return `<tr><td>${esc(month)}</td><td>${mid ? statusBadge(mid.status) : '<span class="badge warn">未</span>'}</td><td>${end ? statusBadge(end.status) : '<span class="badge warn">未</span>'}</td><td>${esc([mid && mid.note, end && end.note].filter(Boolean).join(" / "))}</td><td>${renderHandoffStatus(month)} <button class="button secondary small" data-action="month-handoff" data-month="${esc(month)}" type="button">提出HTML</button></td></tr>`;
           }).join("")}</tbody>
         </table>
       </div>
+    `;
+  }
+
+  function renderHandoffStatus(month) {
+    const latest = latestHandoffForMonth(month);
+    if (!latest) return '<span class="badge warn">未提出</span>';
+    return `<span class="badge good">提出済 ${esc(formatDateTime(latest.exportedAt))}</span>`;
+  }
+
+  function renderMonthlyHandoffHistory(months) {
+    const rows = fiscalHandoffs().slice(0, 40);
+    const missingMonths = months.filter((month) => !latestHandoffForMonth(month));
+    return `
+      ${missingMonths.length ? `<div class="notice" style="margin-bottom:12px;">未提出月: ${missingMonths.map((month) => esc(monthLabel(month))).join("、")}</div>` : `<div class="notice info" style="margin-bottom:12px;">全ての月に提出履歴があります。</div>`}
+      ${rows.length ? `<div class="table-wrap"><table>
+        <thead><tr><th>提出日時</th><th>対象月</th><th>ファイル名</th><th class="num">経費</th><th class="num">売上</th><th class="num">請求書</th><th class="num">未確認</th></tr></thead>
+        <tbody>${rows.map((item) => `<tr><td>${esc(formatDateTime(item.exportedAt))}</td><td>${esc(monthLabel(item.month))}</td><td>${esc(item.fileName || "")}</td><td class="num">${item.expenseCount || 0}件</td><td class="num">${item.saleCount || 0}件</td><td class="num">${item.invoiceCount || 0}件</td><td class="num">${item.issueCount || 0}件</td></tr>`).join("")}</tbody>
+      </table></div>` : `<div class="empty">月次提出HTMLの出力履歴はまだありません。</div>`}
     `;
   }
 
@@ -2134,6 +2159,7 @@
       journals: fiscalItems(state.journals, "date"),
       bookEntries: fiscalBookEntries(),
       trash: state.trash || [],
+      handoffs: fiscalHandoffs(),
       audit: state.audit
     };
     addAudit("税理士提出パック出力", { fiscalYear: selectedFiscalYear });
@@ -2190,6 +2216,8 @@
     if (!month) return;
     const data = monthlyHandoffData(month);
     const html = monthlyHandoffHtml(data);
+    const fileName = `月次提出-${safeFilePart(month)}-${TODAY}.html`;
+    recordMonthlyHandoff(data, fileName);
     addAudit("月次提出HTML出力", {
       month,
       expenses: data.expenses.length,
@@ -2198,7 +2226,26 @@
       issues: data.issues.length
     });
     persist("月次提出HTML");
-    downloadBlob(`月次提出-${safeFilePart(month)}-${TODAY}.html`, new Blob([html], { type: "text/html;charset=utf-8" }));
+    downloadBlob(fileName, new Blob([html], { type: "text/html;charset=utf-8" }));
+  }
+
+  function recordMonthlyHandoff(data, fileName) {
+    state.handoffs = Array.isArray(state.handoffs) ? state.handoffs : [];
+    state.handoffs.push({
+      id: uid("handoff"),
+      month: data.month,
+      fileName,
+      exportedAt: new Date().toISOString(),
+      expenseCount: data.expenses.length,
+      expenseTotal: sum(data.expenses, "amount"),
+      saleCount: data.sales.length,
+      saleTotal: sum(data.sales, "amount"),
+      invoiceCount: data.invoices.length,
+      invoiceTotal: sum(data.invoices, "amount"),
+      estimateCount: data.estimates.length,
+      issueCount: data.issues.length
+    });
+    if (state.handoffs.length > 500) state.handoffs = state.handoffs.slice(-500);
   }
 
   function monthlyHandoffData(month) {
@@ -3013,6 +3060,18 @@
       const dates = [invoice.issueDate, invoice.serviceDate, invoice.expectedPaymentDate, invoice.paymentDate].filter(Boolean);
       return dates.some((date) => date >= range.start && date <= range.end);
     });
+  }
+
+  function fiscalHandoffs() {
+    return (state.handoffs || [])
+      .filter((item) => item.month && getFiscalYear(`${item.month}-01`) === selectedFiscalYear)
+      .sort((a, b) => String(b.exportedAt || "").localeCompare(String(a.exportedAt || "")));
+  }
+
+  function latestHandoffForMonth(month) {
+    return (state.handoffs || [])
+      .filter((item) => item.month === month)
+      .sort((a, b) => String(b.exportedAt || "").localeCompare(String(a.exportedAt || "")))[0];
   }
 
   function getFiscalYear(dateString) {
