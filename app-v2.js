@@ -51,6 +51,12 @@
     sales: ["売上", "振込入金を売上として通帳別に管理"],
     invoices: ["請求書", "請求番号、実施日、支払予定日、入金日のずれを管理"],
     estimates: ["見積", "見積番号、金額、請求書化状況を記録"],
+    deliveries: ["納品書", "納品番号、納品日、請求書化状況を記録"],
+    receiptDocs: ["領収書", "入金後に相手へ渡す領収書を作成"],
+    salesFlow: ["販売管理", "見積、納品、請求、入金、領収書まで一連で確認"],
+    partners: ["取引先", "住所、敬称、担当者、送付先、振込条件を管理"],
+    items: ["品目", "品名、標準単価、単位、税率を管理"],
+    recurring: ["毎月自動", "毎月同じ請求、納品、領収書の作成予定を管理"],
     trips: ["出張台帳", "移動、宿泊、ガソリン請求を記録"],
     payroll: ["給与台帳", "月別の給与、手当、控除、支払日を記録"],
     cards: ["カード台帳", "カード明細、領収書、T番号をまとめて確認"],
@@ -128,6 +134,11 @@
       sales: [],
       invoices: [],
       estimates: [],
+      deliveries: [],
+      receiptDocs: [],
+      partners: [],
+      items: [],
+      recurringDocs: [],
       trips: [],
       payroll: [],
       hitech: [],
@@ -168,6 +179,11 @@
       "sales",
       "invoices",
       "estimates",
+      "deliveries",
+      "receiptDocs",
+      "partners",
+      "items",
+      "recurringDocs",
       "trips",
       "payroll",
       "hitech",
@@ -243,6 +259,12 @@
       sales: renderSales,
       invoices: renderInvoices,
       estimates: renderEstimates,
+      deliveries: renderDeliveries,
+      receiptDocs: renderReceiptDocs,
+      salesFlow: renderSalesFlow,
+      partners: renderPartners,
+      items: renderItems,
+      recurring: renderRecurring,
       trips: () => renderSimpleLedger("trips"),
       payroll: () => renderSimpleLedger("payroll"),
       cards: renderCards,
@@ -600,19 +622,24 @@
         </div>
         <div class="panel-body">
           <form id="invoiceForm" class="form-grid">
+            ${partnerDatalist()}
+            ${itemDatalist()}
             ${field("invoiceNo", "請求書番号", "text", nextInvoiceNo())}
             ${field("issueDate", "請求日", "date", TODAY)}
             ${field("serviceDate", "実施日", "date", TODAY)}
             ${field("dueDate", "支払期限", "date", endOfNextMonth(TODAY))}
             ${field("expectedPaymentDate", "入金予定日", "date", endOfNextMonth(TODAY))}
             ${field("paymentDate", "入金日", "date", "")}
-            ${field("customer", "請求先", "text", "")}
-            ${field("content", "内容", "text", "")}
+            ${textFieldWithList("customer", "請求先", "", "partnerNameList", "取引先マスタから選択または直接入力")}
+            ${textFieldWithList("content", "内容", "", "itemNameList", "品目マスタから選択または直接入力")}
             ${selectField("classification", "分類", salesCategories, "業務委託")}
             ${selectField("department", "部門", departments(), departments()[0])}
             ${field("amount", "金額", "number", "")}
             ${selectField("taxRate", "税区分", taxRates, "10%")}
             ${selectField("status", "状態", invoiceStatuses, "未入金")}
+            ${selectField("template", "テンプレート", documentTemplates(), "標準")}
+            ${selectField("sendStatus", "送付状態", sendStatuses(), "未送付")}
+            ${field("sendDate", "送付日", "date", "")}
             <label class="field" style="grid-column:1 / -1;"><span>税理士確認メモ</span><textarea name="note" placeholder="決算またぎ、実施日の考え方、支払いとのずれなど"></textarea></label>
             <div class="actions" style="grid-column:1 / -1;"><button class="button" type="submit">請求書登録</button></div>
           </form>
@@ -652,7 +679,7 @@
     document.getElementById("exportInvoicesCsv").addEventListener("click", () => exportCsv("invoices", invoices, [
       ["invoiceNo", "請求書番号"], ["issueDate", "請求日"], ["serviceDate", "実施日"], ["dueDate", "支払期限"],
       ["expectedPaymentDate", "入金予定日"], ["paymentDate", "入金日"], ["customer", "請求先"], ["content", "内容"],
-      ["classification", "分類"], ["department", "部門"], ["amount", "金額"], ["status", "状態"], ["note", "確認メモ"]
+      ["classification", "分類"], ["department", "部門"], ["amount", "金額"], ["status", "状態"], ["sendStatus", "送付状態"], ["sendDate", "送付日"], ["template", "テンプレート"], ["note", "確認メモ"]
     ]));
     bindFilterControls("invoices");
     bindTableActions();
@@ -676,6 +703,9 @@
       amount: num(data.amount),
       taxRate: data.taxRate || "10%",
       status: data.paymentDate ? "入金済" : data.status || "未入金",
+      template: data.template || "標準",
+      sendStatus: data.sendStatus || "未送付",
+      sendDate: data.sendDate,
       note: data.note,
       createdAt: new Date().toISOString()
     };
@@ -692,15 +722,21 @@
         <div class="panel-head"><h2>見積登録</h2><button class="button secondary small" id="exportEstimatesCsv" type="button">CSV</button></div>
         <div class="panel-body">
           <form id="estimateForm" class="form-grid">
+            ${partnerDatalist()}
+            ${itemDatalist()}
             ${field("estimateNo", "見積番号", "text", nextEstimateNo())}
             ${field("date", "見積日", "date", TODAY)}
-            ${field("customer", "提出先", "text", "")}
+            ${textFieldWithList("customer", "提出先", "", "partnerNameList", "取引先マスタから選択または直接入力")}
             ${selectField("classification", "分類", salesCategories, "業務委託")}
             ${selectField("department", "部門", departments(), departments()[0])}
-            ${field("content", "内容", "text", "")}
+            ${textFieldWithList("content", "内容", "", "itemNameList", "品目マスタから選択または直接入力")}
             ${field("amount", "金額", "number", "")}
             ${selectField("status", "状態", ["作成中", "提出済", "受注", "失注", "保留"], "作成中")}
+            ${field("linkedDeliveryNo", "納品書番号", "text", "")}
             ${field("linkedInvoiceNo", "請求書番号", "text", "")}
+            ${selectField("template", "テンプレート", documentTemplates(), "標準")}
+            ${selectField("sendStatus", "送付状態", sendStatuses(), "未送付")}
+            ${field("sendDate", "送付日", "date", "")}
             <label class="field" style="grid-column:1 / -1;"><span>メモ</span><textarea name="note"></textarea></label>
             <div class="actions" style="grid-column:1 / -1;"><button class="button" type="submit">見積登録</button></div>
           </form>
@@ -714,7 +750,7 @@
     document.getElementById("estimateForm").addEventListener("submit", handleEstimateSubmit);
     document.getElementById("exportEstimatesCsv").addEventListener("click", () => exportCsv("estimates", estimates, [
       ["estimateNo", "見積番号"], ["date", "見積日"], ["customer", "提出先"], ["classification", "分類"],
-      ["department", "部門"], ["content", "内容"], ["amount", "金額"], ["status", "状態"], ["linkedInvoiceNo", "請求書番号"], ["note", "メモ"]
+      ["department", "部門"], ["content", "内容"], ["amount", "金額"], ["status", "状態"], ["linkedDeliveryNo", "納品書番号"], ["linkedInvoiceNo", "請求書番号"], ["sendStatus", "送付状態"], ["sendDate", "送付日"], ["template", "テンプレート"], ["note", "メモ"]
     ]));
     bindTableActions();
   }
@@ -732,7 +768,11 @@
       content: data.content,
       amount: num(data.amount),
       status: data.status,
+      linkedDeliveryNo: data.linkedDeliveryNo,
       linkedInvoiceNo: data.linkedInvoiceNo,
+      template: data.template || "標準",
+      sendStatus: data.sendStatus || "未送付",
+      sendDate: data.sendDate,
       note: data.note,
       createdAt: new Date().toISOString()
     };
@@ -740,6 +780,286 @@
     addAudit("見積登録", record);
     persist("見積保存");
     renderEstimates();
+  }
+
+  function renderDeliveries() {
+    const deliveries = fiscalItems(state.deliveries, "date").sort(byDate("date"));
+    app.innerHTML = `
+      <section class="panel">
+        <div class="panel-head"><h2>納品書作成</h2><button class="button secondary small" id="exportDeliveriesCsv" type="button">CSV</button></div>
+        <div class="panel-body document-builder">
+          <form id="deliveryForm" class="form-grid">
+            ${partnerDatalist()}
+            ${itemDatalist()}
+            ${field("deliveryNo", "納品書番号", "text", nextDeliveryNo())}
+            ${field("date", "納品日", "date", TODAY)}
+            ${textFieldWithList("customer", "取引先", "", "partnerNameList", "取引先マスタから選択または直接入力")}
+            ${field("subject", "件名", "text", "")}
+            ${textFieldWithList("itemName", "品目", "", "itemNameList", "品目マスタから選択または直接入力")}
+            ${field("quantity", "数量", "number", "1")}
+            ${field("unit", "単位", "text", "式")}
+            ${field("unitPrice", "単価", "number", "")}
+            ${field("amount", "金額", "number", "")}
+            ${selectField("taxRate", "税区分", taxRates, "10%")}
+            ${selectField("template", "テンプレート", documentTemplates(), "標準")}
+            ${selectField("sendStatus", "送付状態", sendStatuses(), "未送付")}
+            ${field("sendDate", "送付日", "date", "")}
+            ${field("linkedEstimateNo", "関連見積番号", "text", "")}
+            ${field("linkedInvoiceNo", "関連請求書番号", "text", "")}
+            <label class="field" style="grid-column:1 / -1;"><span>備考</span><textarea name="note"></textarea></label>
+            <div class="actions" style="grid-column:1 / -1;"><button class="button" type="submit">納品書登録</button></div>
+          </form>
+          <aside class="document-preview-panel">
+            <h3>作成プレビュー</h3>
+            <div id="deliveryPreview" class="document-preview"></div>
+          </aside>
+        </div>
+      </section>
+      <section class="panel" style="margin-top:14px;">
+        <div class="panel-head"><h2>納品書一覧</h2><span class="badge">${deliveries.length}件</span></div>
+        <div class="panel-body">${renderDeliveryTable(deliveries)}</div>
+      </section>
+    `;
+    document.getElementById("deliveryForm").addEventListener("submit", handleDeliverySubmit);
+    document.getElementById("exportDeliveriesCsv").addEventListener("click", () => exportCsv("deliveries", deliveries, deliveryCsvFields()));
+    bindDocumentPreview("deliveryForm", "deliveryPreview", "delivery");
+    bindTableActions();
+  }
+
+  function handleDeliverySubmit(event) {
+    event.preventDefault();
+    const data = formValues(event.currentTarget);
+    const record = deliveryRecordFromData(data);
+    state.deliveries.push(record);
+    addAudit("納品書登録", record);
+    persist("納品書保存");
+    renderDeliveries();
+  }
+
+  function renderReceiptDocs() {
+    const receiptDocs = fiscalItems(state.receiptDocs, "issueDate").sort(byDate("issueDate"));
+    app.innerHTML = `
+      <section class="panel">
+        <div class="panel-head"><h2>領収書作成</h2><button class="button secondary small" id="exportReceiptDocsCsv" type="button">CSV</button></div>
+        <div class="panel-body document-builder">
+          <form id="receiptDocForm" class="form-grid">
+            ${partnerDatalist()}
+            ${itemDatalist()}
+            ${field("receiptNo", "領収書番号", "text", nextReceiptNo())}
+            ${field("issueDate", "発行日", "date", TODAY)}
+            ${field("paymentDate", "入金日", "date", TODAY)}
+            ${textFieldWithList("customer", "取引先", "", "partnerNameList", "取引先マスタから選択または直接入力")}
+            ${field("invoiceNo", "請求書番号", "text", "")}
+            ${textFieldWithList("content", "但し書き・内容", "", "itemNameList", "品目マスタから選択または直接入力")}
+            ${field("amount", "領収金額", "number", "")}
+            ${selectField("taxRate", "税区分", taxRates, "10%")}
+            ${selectField("template", "テンプレート", documentTemplates(), "標準")}
+            ${selectField("sendStatus", "送付状態", sendStatuses(), "未送付")}
+            ${field("sendDate", "送付日", "date", "")}
+            <label class="field" style="grid-column:1 / -1;"><span>備考</span><textarea name="note"></textarea></label>
+            <div class="actions" style="grid-column:1 / -1;"><button class="button" type="submit">領収書登録</button></div>
+          </form>
+          <aside class="document-preview-panel">
+            <h3>作成プレビュー</h3>
+            <div id="receiptDocPreview" class="document-preview"></div>
+          </aside>
+        </div>
+      </section>
+      <section class="panel" style="margin-top:14px;">
+        <div class="panel-head"><h2>領収書一覧</h2><span class="badge">${receiptDocs.length}件</span></div>
+        <div class="panel-body">${renderReceiptDocTable(receiptDocs)}</div>
+      </section>
+    `;
+    document.getElementById("receiptDocForm").addEventListener("submit", handleReceiptDocSubmit);
+    document.getElementById("exportReceiptDocsCsv").addEventListener("click", () => exportCsv("receipt-docs", receiptDocs, receiptDocCsvFields()));
+    bindDocumentPreview("receiptDocForm", "receiptDocPreview", "receipt");
+    bindTableActions();
+  }
+
+  function handleReceiptDocSubmit(event) {
+    event.preventDefault();
+    const data = formValues(event.currentTarget);
+    const record = receiptDocRecordFromData(data);
+    state.receiptDocs.push(record);
+    addAudit("領収書登録", record);
+    persist("領収書保存");
+    renderReceiptDocs();
+  }
+
+  function renderPartners() {
+    const partners = [...(state.partners || [])].sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), "ja"));
+    app.innerHTML = `
+      <section class="panel">
+        <div class="panel-head"><h2>取引先登録</h2><button class="button secondary small" id="exportPartnersCsv" type="button">CSV</button></div>
+        <div class="panel-body">
+          <form id="partnerForm" class="form-grid">
+            ${field("name", "取引先名", "text", "")}
+            ${selectField("honorific", "敬称", ["御中", "様", "先生", "なし"], "御中")}
+            ${field("contact", "担当者", "text", "")}
+            ${field("email", "メール", "email", "")}
+            ${field("phone", "電話", "tel", "")}
+            ${field("paymentTerms", "支払条件", "text", "月末締め翌月末払い")}
+            <label class="field" style="grid-column:1 / -1;"><span>住所・送付先</span><textarea name="address"></textarea></label>
+            <label class="field" style="grid-column:1 / -1;"><span>振込先・請求条件メモ</span><textarea name="bankInfo"></textarea></label>
+            <label class="field" style="grid-column:1 / -1;"><span>メモ</span><textarea name="note"></textarea></label>
+            <div class="actions" style="grid-column:1 / -1;"><button class="button" type="submit">取引先登録</button></div>
+          </form>
+        </div>
+      </section>
+      <section class="panel" style="margin-top:14px;">
+        <div class="panel-head"><h2>取引先一覧</h2><span class="badge">${partners.length}件</span></div>
+        <div class="panel-body">${renderPartnerTable(partners)}</div>
+      </section>
+    `;
+    document.getElementById("partnerForm").addEventListener("submit", handlePartnerSubmit);
+    document.getElementById("exportPartnersCsv").addEventListener("click", () => exportCsv("partners", partners, partnerCsvFields()));
+    bindTableActions();
+  }
+
+  function handlePartnerSubmit(event) {
+    event.preventDefault();
+    const data = formValues(event.currentTarget);
+    const record = {
+      id: uid("partner"),
+      name: data.name,
+      honorific: data.honorific || "御中",
+      contact: data.contact,
+      email: data.email,
+      phone: data.phone,
+      paymentTerms: data.paymentTerms,
+      address: data.address,
+      bankInfo: data.bankInfo,
+      note: data.note,
+      createdAt: new Date().toISOString()
+    };
+    state.partners.push(record);
+    addAudit("取引先登録", record);
+    persist("取引先保存");
+    renderPartners();
+  }
+
+  function renderItems() {
+    const items = [...(state.items || [])].sort((a, b) => String(a.itemName || "").localeCompare(String(b.itemName || ""), "ja"));
+    app.innerHTML = `
+      <section class="panel">
+        <div class="panel-head"><h2>品目登録</h2><button class="button secondary small" id="exportItemsCsv" type="button">CSV</button></div>
+        <div class="panel-body">
+          <form id="itemForm" class="form-grid">
+            ${field("itemCode", "品番", "text", "")}
+            ${field("itemName", "品目名", "text", "")}
+            ${selectField("category", "分類", salesCategories, "業務委託")}
+            ${field("unitPrice", "標準単価", "number", "")}
+            ${field("unit", "単位", "text", "式")}
+            ${selectField("taxRate", "税率", taxRates, "10%")}
+            <label class="field" style="grid-column:1 / -1;"><span>メモ</span><textarea name="note"></textarea></label>
+            <div class="actions" style="grid-column:1 / -1;"><button class="button" type="submit">品目登録</button></div>
+          </form>
+        </div>
+      </section>
+      <section class="panel" style="margin-top:14px;">
+        <div class="panel-head"><h2>品目一覧</h2><span class="badge">${items.length}件</span></div>
+        <div class="panel-body">${renderItemTable(items)}</div>
+      </section>
+    `;
+    document.getElementById("itemForm").addEventListener("submit", handleItemSubmit);
+    document.getElementById("exportItemsCsv").addEventListener("click", () => exportCsv("items", items, itemCsvFields()));
+    bindTableActions();
+  }
+
+  function handleItemSubmit(event) {
+    event.preventDefault();
+    const data = formValues(event.currentTarget);
+    const record = {
+      id: uid("item"),
+      itemCode: data.itemCode,
+      itemName: data.itemName,
+      category: data.category || "業務委託",
+      unitPrice: num(data.unitPrice),
+      unit: data.unit || "式",
+      taxRate: data.taxRate || "10%",
+      note: data.note,
+      createdAt: new Date().toISOString()
+    };
+    state.items.push(record);
+    addAudit("品目登録", record);
+    persist("品目保存");
+    renderItems();
+  }
+
+  function renderRecurring() {
+    const templates = [...(state.recurringDocs || [])].sort((a, b) => String(a.title || "").localeCompare(String(b.title || ""), "ja"));
+    app.innerHTML = `
+      <section class="panel">
+        <div class="panel-head"><h2>毎月自動作成ルール</h2><button class="button secondary small" id="exportRecurringCsv" type="button">CSV</button></div>
+        <div class="panel-body">
+          <form id="recurringForm" class="form-grid">
+            ${partnerDatalist()}
+            ${itemDatalist()}
+            ${field("title", "ルール名", "text", "")}
+            ${selectField("documentType", "作成帳票", [["invoice", "請求書"], ["delivery", "納品書"], ["receipt", "領収書"]], "invoice")}
+            ${field("dayOfMonth", "作成日", "number", "15")}
+            ${textFieldWithList("customer", "取引先", "", "partnerNameList", "取引先マスタから選択または直接入力")}
+            ${textFieldWithList("content", "内容", "", "itemNameList", "品目マスタから選択または直接入力")}
+            ${field("amount", "金額", "number", "")}
+            ${selectField("classification", "分類", salesCategories, "業務委託")}
+            ${selectField("department", "部門", departments(), departments()[0])}
+            ${selectField("taxRate", "税区分", taxRates, "10%")}
+            ${selectField("template", "テンプレート", documentTemplates(), "標準")}
+            <label class="check-field"><input name="active" type="checkbox" checked> 有効</label>
+            <label class="field" style="grid-column:1 / -1;"><span>メモ</span><textarea name="note"></textarea></label>
+            <div class="actions" style="grid-column:1 / -1;"><button class="button" type="submit">ルール登録</button></div>
+          </form>
+        </div>
+      </section>
+      <section class="panel" style="margin-top:14px;">
+        <div class="panel-head"><h2>自動作成一覧</h2><span class="badge">${templates.length}件</span></div>
+        <div class="panel-body">${renderRecurringTable(templates)}</div>
+      </section>
+    `;
+    document.getElementById("recurringForm").addEventListener("submit", handleRecurringSubmit);
+    document.getElementById("exportRecurringCsv").addEventListener("click", () => exportCsv("recurring-docs", templates, recurringCsvFields()));
+    bindRecurringActions();
+    bindTableActions();
+  }
+
+  function handleRecurringSubmit(event) {
+    event.preventDefault();
+    const data = formValues(event.currentTarget);
+    const formData = new FormData(event.currentTarget);
+    const record = {
+      id: uid("recurring"),
+      title: data.title,
+      documentType: data.documentType || "invoice",
+      dayOfMonth: Math.min(31, Math.max(1, num(data.dayOfMonth) || 15)),
+      customer: data.customer,
+      content: data.content,
+      amount: num(data.amount),
+      classification: data.classification || "業務委託",
+      department: data.department || departments()[0],
+      taxRate: data.taxRate || "10%",
+      template: data.template || "標準",
+      active: Boolean(formData.get("active")),
+      lastCreatedMonth: "",
+      note: data.note,
+      createdAt: new Date().toISOString()
+    };
+    state.recurringDocs.push(record);
+    addAudit("毎月自動ルール登録", record);
+    persist("毎月自動保存");
+    renderRecurring();
+  }
+
+  function renderSalesFlow() {
+    const rows = salesFlowRows();
+    app.innerHTML = `
+      <section class="panel">
+        <div class="panel-head"><h2>販売管理台帳</h2><span class="badge">${rows.length}件</span></div>
+        <div class="panel-body">
+          <div class="notice info" style="margin-bottom:12px;">見積 → 納品 → 請求 → 入金 → 領収書の流れを横並びで確認します。請求書があるのに入金がない、入金済みなのに領収書がない、という確認に使えます。</div>
+          ${renderSalesFlowTable(rows)}
+        </div>
+      </section>
+    `;
   }
 
   function renderSimpleLedger(type) {
@@ -1414,6 +1734,9 @@
   function recordDate(collection, record) {
     if (!record) return "";
     if (collection === "invoices") return record.serviceDate || record.issueDate || record.expectedPaymentDate || record.paymentDate || "";
+    if (collection === "receiptDocs") return record.issueDate || record.paymentDate || "";
+    if (collection === "deliveries") return record.date || "";
+    if (collection === "partners" || collection === "items" || collection === "recurringDocs") return "";
     if (collection === "payroll") return record.payDate || (record.payMonth ? `${record.payMonth}-01` : "");
     if (collection === "closings") return record.month ? `${record.month}-01` : "";
     return record.date || record.issueDate || record.createdAt || "";
@@ -1425,6 +1748,11 @@
     if (collection === "sales") return [record.customer, record.content, record.invoiceNo].filter(Boolean).join(" / ");
     if (collection === "invoices") return [record.invoiceNo, record.customer, record.content].filter(Boolean).join(" / ");
     if (collection === "estimates") return [record.estimateNo, record.customer, record.content].filter(Boolean).join(" / ");
+    if (collection === "deliveries") return [record.deliveryNo, record.customer, record.subject || record.itemName].filter(Boolean).join(" / ");
+    if (collection === "receiptDocs") return [record.receiptNo, record.customer, record.invoiceNo].filter(Boolean).join(" / ");
+    if (collection === "partners") return [record.name, record.contact].filter(Boolean).join(" / ");
+    if (collection === "items") return [record.itemCode, record.itemName].filter(Boolean).join(" / ");
+    if (collection === "recurringDocs") return [record.title, documentTypeLabel(record.documentType), record.customer].filter(Boolean).join(" / ");
     if (collection === "trips") return [record.destination, record.purpose].filter(Boolean).join(" / ");
     if (collection === "payroll") return [record.payMonth, record.employee].filter(Boolean).join(" / ");
     if (collection === "hitech") return [record.sender, record.instructor, record.course].filter(Boolean).join(" / ");
@@ -1437,6 +1765,11 @@
       sales: "売上",
       invoices: "請求書",
       estimates: "見積",
+      deliveries: "納品書",
+      receiptDocs: "領収書",
+      partners: "取引先",
+      items: "品目",
+      recurringDocs: "毎月自動",
       trips: "出張台帳",
       payroll: "給与台帳",
       hitech: "ハイテク台帳",
@@ -1640,16 +1973,18 @@
     return `
       <div class="table-wrap">
         <table>
-          <thead><tr><th>番号</th><th>請求日</th><th>実施日</th><th>支払期限</th><th>入金予定</th><th>入金日</th><th>請求先</th><th>内容</th><th class="num">金額</th><th>状態</th><th>確認</th><th>操作</th></tr></thead>
+          <thead><tr><th>番号</th><th>請求日</th><th>実施日</th><th>支払期限</th><th>入金予定</th><th>入金日</th><th>請求先</th><th>内容</th><th class="num">金額</th><th>状態</th><th>送付</th><th>確認</th><th>操作</th></tr></thead>
           <tbody>${items.map((item) => {
             const sale = findSaleForInvoice(item);
             const crossing = fiscalCrossing(item);
             const mismatch = sale && num(sale.amount) !== num(item.amount);
+            const receiptCreated = receiptExistsForInvoice(item.invoiceNo);
             return `<tr>
               <td>${esc(item.invoiceNo)}</td><td>${esc(formatDate(item.issueDate))}</td><td>${esc(formatDate(item.serviceDate))}</td><td>${esc(formatDate(item.dueDate))}</td><td>${esc(formatDate(item.expectedPaymentDate))}</td><td>${esc(formatDate(item.paymentDate))}</td>
               <td>${esc(item.customer)}</td><td>${esc(item.content)}</td><td class="num">${yen(item.amount)}</td><td>${statusBadge(item.status)}</td>
+              <td>${statusBadge(item.sendStatus || "未送付")} ${item.sendDate ? esc(formatDate(item.sendDate)) : ""}</td>
               <td>${crossing ? '<span class="badge bad">決算またぎ</span>' : ""} ${mismatch ? '<span class="badge bad">金額差</span>' : ""}</td>
-              <td>${rowActions("invoices", item.id)} <button class="button small secondary" data-action="issue-invoice" data-id="${esc(item.id)}" type="button">請求書発行</button> ${item.status !== "入金済" ? `<button class="button small secondary" data-action="make-sale" data-id="${esc(item.id)}" type="button">売上化</button>` : ""}</td>
+              <td>${rowActions("invoices", item.id)} <button class="button small secondary" data-action="issue-invoice" data-id="${esc(item.id)}" type="button">請求書発行</button> ${item.status !== "入金済" ? `<button class="button small secondary" data-action="make-sale" data-id="${esc(item.id)}" type="button">売上化</button>` : ""} ${receiptCreated ? '<span class="badge good">領収書済</span>' : `<button class="button small secondary" data-action="invoice-to-receipt" data-id="${esc(item.id)}" type="button">領収書化</button>`}</td>
             </tr>`;
           }).join("")}</tbody>
         </table>
@@ -1661,8 +1996,85 @@
     if (!items.length) return `<div class="empty">見積データはありません。</div>`;
     return `
       <div class="table-wrap"><table>
-        <thead><tr><th>番号</th><th>日付</th><th>提出先</th><th>分類</th><th>部門</th><th>内容</th><th class="num">金額</th><th>状態</th><th>請求書番号</th><th>操作</th></tr></thead>
-        <tbody>${items.map((item) => `<tr><td>${esc(item.estimateNo)}</td><td>${esc(formatDate(item.date))}</td><td>${esc(item.customer)}</td><td>${esc(item.classification)}</td><td>${esc(item.department || "")}</td><td>${esc(item.content)}</td><td class="num">${yen(item.amount)}</td><td>${statusBadge(item.status)}</td><td>${esc(item.linkedInvoiceNo || "")}</td><td>${rowActions("estimates", item.id)} <button class="button small secondary" data-action="issue-estimate" data-id="${esc(item.id)}" type="button">見積書発行</button>${item.linkedInvoiceNo ? "" : ` <button class="button small secondary" data-action="estimate-to-invoice" data-id="${esc(item.id)}" type="button">請求書化</button>`}</td></tr>`).join("")}</tbody>
+        <thead><tr><th>番号</th><th>日付</th><th>提出先</th><th>分類</th><th>部門</th><th>内容</th><th class="num">金額</th><th>状態</th><th>納品書番号</th><th>請求書番号</th><th>送付</th><th>操作</th></tr></thead>
+        <tbody>${items.map((item) => `<tr><td>${esc(item.estimateNo)}</td><td>${esc(formatDate(item.date))}</td><td>${esc(item.customer)}</td><td>${esc(item.classification)}</td><td>${esc(item.department || "")}</td><td>${esc(item.content)}</td><td class="num">${yen(item.amount)}</td><td>${statusBadge(item.status)}</td><td>${esc(item.linkedDeliveryNo || "")}</td><td>${esc(item.linkedInvoiceNo || "")}</td><td>${statusBadge(item.sendStatus || "未送付")} ${item.sendDate ? esc(formatDate(item.sendDate)) : ""}</td><td>${rowActions("estimates", item.id)} <button class="button small secondary" data-action="issue-estimate" data-id="${esc(item.id)}" type="button">見積書発行</button>${item.linkedDeliveryNo ? "" : ` <button class="button small secondary" data-action="estimate-to-delivery" data-id="${esc(item.id)}" type="button">納品書化</button>`}${item.linkedInvoiceNo ? "" : ` <button class="button small secondary" data-action="estimate-to-invoice" data-id="${esc(item.id)}" type="button">請求書化</button>`}</td></tr>`).join("")}</tbody>
+      </table></div>
+    `;
+  }
+
+  function renderDeliveryTable(items) {
+    if (!items.length) return `<div class="empty">納品書データはありません。</div>`;
+    return `
+      <div class="table-wrap"><table>
+        <thead><tr><th>番号</th><th>納品日</th><th>取引先</th><th>件名</th><th>品目</th><th class="num">数量</th><th class="num">金額</th><th>関連見積</th><th>請求書番号</th><th>送付</th><th>操作</th></tr></thead>
+        <tbody>${items.map((item) => `<tr>
+          <td>${esc(item.deliveryNo)}</td><td>${esc(formatDate(item.date))}</td><td>${esc(item.customer || "")}</td><td>${esc(item.subject || "")}</td><td>${esc(item.itemName || "")}</td>
+          <td class="num">${esc(item.quantity || "")} ${esc(item.unit || "")}</td><td class="num">${yen(item.amount)}</td><td>${esc(item.linkedEstimateNo || "")}</td><td>${esc(item.linkedInvoiceNo || "")}</td>
+          <td>${statusBadge(item.sendStatus || "未送付")} ${item.sendDate ? esc(formatDate(item.sendDate)) : ""}</td>
+          <td>${rowActions("deliveries", item.id)} <button class="button small secondary" data-action="issue-delivery" data-id="${esc(item.id)}" type="button">納品書発行</button>${item.linkedInvoiceNo ? "" : ` <button class="button small secondary" data-action="delivery-to-invoice" data-id="${esc(item.id)}" type="button">請求書化</button>`}</td>
+        </tr>`).join("")}</tbody>
+      </table></div>
+    `;
+  }
+
+  function renderReceiptDocTable(items) {
+    if (!items.length) return `<div class="empty">領収書データはありません。</div>`;
+    return `
+      <div class="table-wrap"><table>
+        <thead><tr><th>番号</th><th>発行日</th><th>入金日</th><th>取引先</th><th>請求書番号</th><th>内容</th><th class="num">金額</th><th>送付</th><th>操作</th></tr></thead>
+        <tbody>${items.map((item) => `<tr>
+          <td>${esc(item.receiptNo)}</td><td>${esc(formatDate(item.issueDate))}</td><td>${esc(formatDate(item.paymentDate))}</td><td>${esc(item.customer || "")}</td><td>${esc(item.invoiceNo || "")}</td><td>${esc(item.content || "")}</td><td class="num">${yen(item.amount)}</td>
+          <td>${statusBadge(item.sendStatus || "未送付")} ${item.sendDate ? esc(formatDate(item.sendDate)) : ""}</td>
+          <td>${rowActions("receiptDocs", item.id)} <button class="button small secondary" data-action="issue-receipt-doc" data-id="${esc(item.id)}" type="button">領収書発行</button></td>
+        </tr>`).join("")}</tbody>
+      </table></div>
+    `;
+  }
+
+  function renderPartnerTable(items) {
+    if (!items.length) return `<div class="empty">取引先はまだ登録されていません。</div>`;
+    return `
+      <div class="table-wrap"><table>
+        <thead><tr><th>取引先</th><th>敬称</th><th>担当者</th><th>メール</th><th>電話</th><th>支払条件</th><th>送付先</th><th>操作</th></tr></thead>
+        <tbody>${items.map((item) => `<tr><td>${esc(item.name || "")}</td><td>${esc(item.honorific || "")}</td><td>${esc(item.contact || "")}</td><td>${esc(item.email || "")}</td><td>${esc(item.phone || "")}</td><td>${esc(item.paymentTerms || "")}</td><td>${esc(item.address || "")}</td><td>${rowActions("partners", item.id)}</td></tr>`).join("")}</tbody>
+      </table></div>
+    `;
+  }
+
+  function renderItemTable(items) {
+    if (!items.length) return `<div class="empty">品目はまだ登録されていません。</div>`;
+    return `
+      <div class="table-wrap"><table>
+        <thead><tr><th>品番</th><th>品目</th><th>分類</th><th class="num">標準単価</th><th>単位</th><th>税率</th><th>操作</th></tr></thead>
+        <tbody>${items.map((item) => `<tr><td>${esc(item.itemCode || "")}</td><td>${esc(item.itemName || "")}</td><td>${esc(item.category || "")}</td><td class="num">${yen(item.unitPrice)}</td><td>${esc(item.unit || "")}</td><td>${esc(item.taxRate || "")}</td><td>${rowActions("items", item.id)}</td></tr>`).join("")}</tbody>
+      </table></div>
+    `;
+  }
+
+  function renderRecurringTable(items) {
+    if (!items.length) return `<div class="empty">毎月自動作成ルールはまだありません。</div>`;
+    return `
+      <div class="table-wrap"><table>
+        <thead><tr><th>ルール名</th><th>帳票</th><th>作成日</th><th>取引先</th><th>内容</th><th class="num">金額</th><th>状態</th><th>最終作成月</th><th>操作</th></tr></thead>
+        <tbody>${items.map((item) => `<tr><td>${esc(item.title || "")}</td><td>${esc(documentTypeLabel(item.documentType))}</td><td>${esc(item.dayOfMonth || "")}日</td><td>${esc(item.customer || "")}</td><td>${esc(item.content || "")}</td><td class="num">${yen(item.amount)}</td><td>${statusBadge(item.active ? "完了" : "保留")}</td><td>${esc(item.lastCreatedMonth || "")}</td><td>${rowActions("recurringDocs", item.id)} <button class="button small secondary" data-action="create-recurring" data-id="${esc(item.id)}" type="button">今月分を作成</button></td></tr>`).join("")}</tbody>
+      </table></div>
+    `;
+  }
+
+  function renderSalesFlowTable(rows) {
+    if (!rows.length) return `<div class="empty">販売管理の対象データはまだありません。</div>`;
+    return `
+      <div class="table-wrap"><table>
+        <thead><tr><th>基準日</th><th>取引先</th><th>内容</th><th>見積</th><th>納品</th><th>請求</th><th>入金</th><th>領収</th><th class="num">金額</th><th>確認</th></tr></thead>
+        <tbody>${rows.map((row) => `<tr>
+          <td>${esc(formatDate(row.date))}</td><td>${esc(row.customer || "")}</td><td>${esc(row.content || "")}</td>
+          <td>${row.estimate ? `${statusBadge(row.estimate.status || "作成中")}<br>${esc(row.estimate.estimateNo || "")}` : '<span class="badge warn">なし</span>'}</td>
+          <td>${row.delivery ? `${statusBadge(row.delivery.sendStatus || "未送付")}<br>${esc(row.delivery.deliveryNo || "")}` : '<span class="badge warn">なし</span>'}</td>
+          <td>${row.invoice ? `${statusBadge(row.invoice.status || "未入金")}<br>${esc(row.invoice.invoiceNo || "")}` : '<span class="badge warn">なし</span>'}</td>
+          <td>${row.sale ? `${statusBadge("入金済")}<br>${esc(formatDate(row.sale.date))}` : '<span class="badge warn">未入金</span>'}</td>
+          <td>${row.receipt ? `${statusBadge(row.receipt.sendStatus || "未送付")}<br>${esc(row.receipt.receiptNo || "")}` : '<span class="badge warn">未発行</span>'}</td>
+          <td class="num">${yen(row.amount)}</td><td>${salesFlowIssueBadges(row)}</td>
+        </tr>`).join("")}</tbody>
       </table></div>
     `;
   }
@@ -1820,6 +2232,9 @@
       if (invoice.status === "入金済" && !sale) {
         issues.push({ severity: "warn", title: `売上未照合 ${invoice.invoiceNo}`, body: "入金済みですが売上一覧に同じ請求書番号がありません。" });
       }
+      if ((invoice.status === "入金済" || sale) && !receiptExistsForInvoice(invoice.invoiceNo)) {
+        issues.push({ severity: "warn", title: `領収書未発行 ${invoice.invoiceNo}`, body: "入金済みですが、相手へ渡す領収書がまだ作成されていません。" });
+      }
       if (sale && num(sale.amount) !== num(invoice.amount)) {
         issues.push({ severity: "bad", title: `金額差 ${invoice.invoiceNo}`, body: `請求 ${yen(invoice.amount)} / 売上 ${yen(sale.amount)}。差額を確認してください。` });
       }
@@ -1916,10 +2331,45 @@
       });
     });
 
+    app.querySelectorAll("[data-action='issue-delivery']").forEach((button) => {
+      button.addEventListener("click", () => {
+        const delivery = state.deliveries.find((item) => item.id === button.dataset.id);
+        if (delivery) exportDeliveryDocument(delivery);
+      });
+    });
+
+    app.querySelectorAll("[data-action='issue-receipt-doc']").forEach((button) => {
+      button.addEventListener("click", () => {
+        const receiptDoc = state.receiptDocs.find((item) => item.id === button.dataset.id);
+        if (receiptDoc) exportReceiptDocDocument(receiptDoc);
+      });
+    });
+
+    app.querySelectorAll("[data-action='estimate-to-delivery']").forEach((button) => {
+      button.addEventListener("click", () => {
+        const estimate = state.estimates.find((item) => item.id === button.dataset.id);
+        if (estimate) createDeliveryFromEstimate(estimate);
+      });
+    });
+
     app.querySelectorAll("[data-action='estimate-to-invoice']").forEach((button) => {
       button.addEventListener("click", () => {
         const estimate = state.estimates.find((item) => item.id === button.dataset.id);
         if (estimate) createInvoiceFromEstimate(estimate);
+      });
+    });
+
+    app.querySelectorAll("[data-action='delivery-to-invoice']").forEach((button) => {
+      button.addEventListener("click", () => {
+        const delivery = state.deliveries.find((item) => item.id === button.dataset.id);
+        if (delivery) createInvoiceFromDelivery(delivery);
+      });
+    });
+
+    app.querySelectorAll("[data-action='invoice-to-receipt']").forEach((button) => {
+      button.addEventListener("click", () => {
+        const invoice = state.invoices.find((item) => item.id === button.dataset.id);
+        if (invoice) createReceiptFromInvoice(invoice);
       });
     });
 
@@ -1951,6 +2401,15 @@
         addAudit("請求書売上化", sale);
         persist("売上化");
         renderInvoices();
+      });
+    });
+  }
+
+  function bindRecurringActions() {
+    app.querySelectorAll("[data-action='create-recurring']").forEach((button) => {
+      button.addEventListener("click", () => {
+        const template = state.recurringDocs.find((item) => item.id === button.dataset.id);
+        if (template) createRecurringDocument(template);
       });
     });
   }
@@ -2046,6 +2505,12 @@
         ${field("amount", "金額", "number", item.amount || "")}
         ${selectField("taxRate", "税区分", taxRates, item.taxRate || "10%")}
         ${selectField("status", "状態", invoiceStatuses, item.status || "未入金")}
+        ${selectField("template", "テンプレート", documentTemplates(), item.template || "標準")}
+        ${selectField("sendStatus", "送付状態", sendStatuses(), item.sendStatus || "未送付")}
+        ${field("sendDate", "送付日", "date", item.sendDate || "")}
+        ${field("linkedEstimateNo", "関連見積番号", "text", item.linkedEstimateNo || "")}
+        ${field("linkedDeliveryNo", "関連納品書番号", "text", item.linkedDeliveryNo || "")}
+        ${field("linkedReceiptNo", "関連領収書番号", "text", item.linkedReceiptNo || "")}
         <label class="field" style="grid-column:1 / -1;"><span>確認メモ</span><textarea name="note">${esc(item.note || "")}</textarea></label>
       `;
     }
@@ -2059,7 +2524,88 @@
         ${field("content", "内容", "text", item.content || "")}
         ${field("amount", "金額", "number", item.amount || "")}
         ${selectField("status", "状態", ["作成中", "提出済", "受注", "失注", "保留"], item.status || "作成中")}
+        ${field("linkedDeliveryNo", "納品書番号", "text", item.linkedDeliveryNo || "")}
         ${field("linkedInvoiceNo", "請求書番号", "text", item.linkedInvoiceNo || "")}
+        ${selectField("template", "テンプレート", documentTemplates(), item.template || "標準")}
+        ${selectField("sendStatus", "送付状態", sendStatuses(), item.sendStatus || "未送付")}
+        ${field("sendDate", "送付日", "date", item.sendDate || "")}
+        <label class="field" style="grid-column:1 / -1;"><span>メモ</span><textarea name="note">${esc(item.note || "")}</textarea></label>
+      `;
+    }
+    if (collection === "deliveries") {
+      return `
+        ${field("deliveryNo", "納品書番号", "text", item.deliveryNo || "")}
+        ${field("date", "納品日", "date", item.date || TODAY)}
+        ${field("customer", "取引先", "text", item.customer || "")}
+        ${field("subject", "件名", "text", item.subject || "")}
+        ${field("itemName", "品目", "text", item.itemName || "")}
+        ${field("quantity", "数量", "number", item.quantity || "1")}
+        ${field("unit", "単位", "text", item.unit || "式")}
+        ${field("unitPrice", "単価", "number", item.unitPrice || "")}
+        ${field("amount", "金額", "number", item.amount || "")}
+        ${selectField("taxRate", "税区分", taxRates, item.taxRate || "10%")}
+        ${selectField("template", "テンプレート", documentTemplates(), item.template || "標準")}
+        ${selectField("sendStatus", "送付状態", sendStatuses(), item.sendStatus || "未送付")}
+        ${field("sendDate", "送付日", "date", item.sendDate || "")}
+        ${field("linkedEstimateNo", "関連見積番号", "text", item.linkedEstimateNo || "")}
+        ${field("linkedInvoiceNo", "関連請求書番号", "text", item.linkedInvoiceNo || "")}
+        <label class="field" style="grid-column:1 / -1;"><span>備考</span><textarea name="note">${esc(item.note || "")}</textarea></label>
+      `;
+    }
+    if (collection === "receiptDocs") {
+      return `
+        ${field("receiptNo", "領収書番号", "text", item.receiptNo || "")}
+        ${field("issueDate", "発行日", "date", item.issueDate || TODAY)}
+        ${field("paymentDate", "入金日", "date", item.paymentDate || TODAY)}
+        ${field("customer", "取引先", "text", item.customer || "")}
+        ${field("invoiceNo", "請求書番号", "text", item.invoiceNo || "")}
+        ${field("content", "但し書き・内容", "text", item.content || "")}
+        ${field("amount", "領収金額", "number", item.amount || "")}
+        ${selectField("taxRate", "税区分", taxRates, item.taxRate || "10%")}
+        ${selectField("template", "テンプレート", documentTemplates(), item.template || "標準")}
+        ${selectField("sendStatus", "送付状態", sendStatuses(), item.sendStatus || "未送付")}
+        ${field("sendDate", "送付日", "date", item.sendDate || "")}
+        <label class="field" style="grid-column:1 / -1;"><span>備考</span><textarea name="note">${esc(item.note || "")}</textarea></label>
+      `;
+    }
+    if (collection === "partners") {
+      return `
+        ${field("name", "取引先名", "text", item.name || "")}
+        ${selectField("honorific", "敬称", ["御中", "様", "先生", "なし"], item.honorific || "御中")}
+        ${field("contact", "担当者", "text", item.contact || "")}
+        ${field("email", "メール", "email", item.email || "")}
+        ${field("phone", "電話", "tel", item.phone || "")}
+        ${field("paymentTerms", "支払条件", "text", item.paymentTerms || "")}
+        <label class="field" style="grid-column:1 / -1;"><span>住所・送付先</span><textarea name="address">${esc(item.address || "")}</textarea></label>
+        <label class="field" style="grid-column:1 / -1;"><span>振込先・条件メモ</span><textarea name="bankInfo">${esc(item.bankInfo || "")}</textarea></label>
+        <label class="field" style="grid-column:1 / -1;"><span>メモ</span><textarea name="note">${esc(item.note || "")}</textarea></label>
+      `;
+    }
+    if (collection === "items") {
+      return `
+        ${field("itemCode", "品番", "text", item.itemCode || "")}
+        ${field("itemName", "品目名", "text", item.itemName || "")}
+        ${selectField("category", "分類", salesCategories, item.category || "業務委託")}
+        ${field("unitPrice", "標準単価", "number", item.unitPrice || "")}
+        ${field("unit", "単位", "text", item.unit || "式")}
+        ${selectField("taxRate", "税率", taxRates, item.taxRate || "10%")}
+        <label class="field" style="grid-column:1 / -1;"><span>メモ</span><textarea name="note">${esc(item.note || "")}</textarea></label>
+      `;
+    }
+    if (collection === "recurringDocs") {
+      return `
+        ${field("title", "ルール名", "text", item.title || "")}
+        ${selectField("documentType", "作成帳票", [["invoice", "請求書"], ["delivery", "納品書"], ["receipt", "領収書"]], item.documentType || "invoice")}
+        ${field("dayOfMonth", "作成日", "number", item.dayOfMonth || "15")}
+        ${field("customer", "取引先", "text", item.customer || "")}
+        ${field("content", "内容", "text", item.content || "")}
+        ${field("amount", "金額", "number", item.amount || "")}
+        ${selectField("classification", "分類", salesCategories, item.classification || "業務委託")}
+        ${selectField("department", "部門", departments(), item.department || departments()[0])}
+        ${selectField("taxRate", "税区分", taxRates, item.taxRate || "10%")}
+        ${selectField("template", "テンプレート", documentTemplates(), item.template || "標準")}
+        <label class="check-field"><input name="active" type="checkbox" ${item.active ? "checked" : ""}> 有効</label>
+        ${field("lastCreatedMonth", "最終作成月", "month", item.lastCreatedMonth || "")}
         <label class="field" style="grid-column:1 / -1;"><span>メモ</span><textarea name="note">${esc(item.note || "")}</textarea></label>
       `;
     }
@@ -2104,7 +2650,7 @@
     if (!item) return;
     const data = formValues(form);
     const formData = new FormData(form);
-    const numericFields = ["quantity", "unitPrice", "amount", "mileage", "fuelClaim", "lodging", "total", "basePay", "allowance", "deduction", "netPay"];
+    const numericFields = ["quantity", "unitPrice", "amount", "mileage", "fuelClaim", "lodging", "total", "basePay", "allowance", "deduction", "netPay", "dayOfMonth"];
 
     Object.entries(data).forEach(([key, value]) => {
       if (key === "proof" || key === "invoiceEligible") return;
@@ -2124,6 +2670,11 @@
     if (collection === "payroll" && !num(item.netPay)) item.netPay = num(item.basePay) + num(item.allowance) - num(item.deduction);
     if (collection === "sales") markInvoicePaidFromSale(item);
     if (collection === "invoices" && item.paymentDate) item.status = "入金済";
+    if (collection === "deliveries" && !num(item.amount)) item.amount = Math.round((num(item.quantity) || 1) * num(item.unitPrice));
+    if (collection === "recurringDocs") {
+      item.active = Boolean(formData.get("active"));
+      item.dayOfMonth = Math.min(31, Math.max(1, num(item.dayOfMonth) || 15));
+    }
     item.updatedAt = new Date().toISOString();
     addAudit(`${collection}編集`, item);
   }
@@ -2152,6 +2703,11 @@
       sales: fiscalItems(state.sales, "date"),
       invoices: fiscalInvoices(),
       estimates: fiscalItems(state.estimates, "date"),
+      deliveries: fiscalItems(state.deliveries, "date"),
+      receiptDocs: fiscalItems(state.receiptDocs, "issueDate"),
+      partners: state.partners || [],
+      items: state.items || [],
+      recurringDocs: state.recurringDocs || [],
       trips: fiscalItems(state.trips, "date"),
       payroll: fiscalItems(state.payroll, "payMonth"),
       hitech: fiscalItems(state.hitech, "date"),
@@ -2243,6 +2799,8 @@
       invoiceCount: data.invoices.length,
       invoiceTotal: sum(data.invoices, "amount"),
       estimateCount: data.estimates.length,
+      deliveryCount: data.deliveries.length,
+      receiptDocCount: data.receiptDocs.length,
       issueCount: data.issues.length
     });
     if (state.handoffs.length > 500) state.handoffs = state.handoffs.slice(-500);
@@ -2256,12 +2814,14 @@
       .filter((item) => [item.issueDate, item.serviceDate, item.dueDate, item.expectedPaymentDate, item.paymentDate].some(inMonth))
       .sort(byDate("issueDate"));
     const estimates = state.estimates.filter((item) => inMonth(item.date)).sort(byDate("date"));
+    const deliveries = state.deliveries.filter((item) => inMonth(item.date)).sort(byDate("date"));
+    const receiptDocs = state.receiptDocs.filter((item) => [item.issueDate, item.paymentDate].some(inMonth)).sort(byDate("issueDate"));
     const closings = state.closings.filter((item) => item.month === month);
     const paymentRows = paymentMethods.map(([key, label]) => {
       const rows = expenses.filter((item) => item.paymentMethod === key);
       return { key, label, count: rows.length, amount: sum(rows, "amount") };
     });
-    const data = { month, expenses, sales, invoices, estimates, closings, paymentRows };
+    const data = { month, expenses, sales, invoices, estimates, deliveries, receiptDocs, closings, paymentRows };
     data.issues = monthlyHandoffIssues(data);
     return data;
   }
@@ -2282,8 +2842,10 @@
 
     data.invoices.forEach((invoice) => {
       const sale = findSaleForInvoice(invoice);
+      const receiptDoc = data.receiptDocs.find((item) => item.invoiceNo && item.invoiceNo === invoice.invoiceNo);
       if (!invoice.serviceDate) issues.push({ severity: "warn", title: `実施日未入力 ${invoice.invoiceNo}`, body: "決算またぎ判断のため実施日を残してください。" });
       if (invoice.status === "入金済" && !sale) issues.push({ severity: "warn", title: `売上未照合 ${invoice.invoiceNo}`, body: "入金済みですが売上一覧に同じ請求書番号がありません。" });
+      if ((invoice.status === "入金済" || sale) && !receiptDoc) issues.push({ severity: "warn", title: `領収書未発行 ${invoice.invoiceNo}`, body: "入金済みですが、相手へ渡す領収書がまだ作成されていません。" });
       if (sale && num(sale.amount) !== num(invoice.amount)) issues.push({ severity: "bad", title: `金額差 ${invoice.invoiceNo}`, body: `請求 ${yen(invoice.amount)} / 売上 ${yen(sale.amount)}。` });
       if (fiscalCrossing(invoice)) issues.push({ severity: "bad", title: `決算またぎ ${invoice.invoiceNo}`, body: "実施日と入金予定/入金日が別年度です。担当税理士に確認が必要。" });
     });
@@ -2322,6 +2884,8 @@
     <div class="card"><span>証憑添付</span><strong>${proofCount}/${data.expenses.length}</strong><span>${data.expenses.length - proofCount}件未添付</span></div>
     <div class="card"><span>売上入金</span><strong>${esc(yen(salesTotal))}</strong><span>${data.sales.length}件</span></div>
     <div class="card"><span>請求書</span><strong>${esc(yen(invoiceTotal))}</strong><span>${data.invoices.length}件</span></div>
+    <div class="card"><span>納品書</span><strong>${data.deliveries.length}件</strong><span>${esc(yen(sum(data.deliveries, "amount")))}</span></div>
+    <div class="card"><span>領収書</span><strong>${data.receiptDocs.length}件</strong><span>${esc(yen(sum(data.receiptDocs, "amount")))}</span></div>
   </div>
 
   <h2>提出前確認</h2>
@@ -2345,6 +2909,10 @@
   <h2>請求書・見積</h2>
   ${data.invoices.length ? `<table><thead><tr><th>番号</th><th>請求日</th><th>実施日</th><th>請求先</th><th>状態</th><th class="num">金額</th></tr></thead><tbody>${data.invoices.map((item) => `<tr><td>${esc(item.invoiceNo || "")}</td><td>${esc(formatDate(item.issueDate))}</td><td>${esc(formatDate(item.serviceDate))}</td><td>${esc(item.customer || "")}</td><td>${esc(item.status || "")}</td><td class="num">${esc(yen(item.amount))}</td></tr>`).join("")}</tbody></table>` : `<p class="muted">この月に関係する請求書はありません。</p>`}
   ${data.estimates.length ? `<table><thead><tr><th>見積番号</th><th>見積日</th><th>提出先</th><th>状態</th><th>請求書番号</th><th class="num">金額</th></tr></thead><tbody>${data.estimates.map((item) => `<tr><td>${esc(item.estimateNo || "")}</td><td>${esc(formatDate(item.date))}</td><td>${esc(item.customer || "")}</td><td>${esc(item.status || "")}</td><td>${esc(item.linkedInvoiceNo || "")}</td><td class="num">${esc(yen(item.amount))}</td></tr>`).join("")}</tbody></table>` : ""}
+
+  <h2>納品書・領収書</h2>
+  ${data.deliveries.length ? `<table><thead><tr><th>納品書番号</th><th>納品日</th><th>取引先</th><th>件名</th><th>請求書番号</th><th class="num">金額</th></tr></thead><tbody>${data.deliveries.map((item) => `<tr><td>${esc(item.deliveryNo || "")}</td><td>${esc(formatDate(item.date))}</td><td>${esc(item.customer || "")}</td><td>${esc(item.subject || item.itemName || "")}</td><td>${esc(item.linkedInvoiceNo || "")}</td><td class="num">${esc(yen(item.amount))}</td></tr>`).join("")}</tbody></table>` : `<p class="muted">この月の納品書はありません。</p>`}
+  ${data.receiptDocs.length ? `<table><thead><tr><th>領収書番号</th><th>発行日</th><th>入金日</th><th>取引先</th><th>請求書番号</th><th class="num">金額</th></tr></thead><tbody>${data.receiptDocs.map((item) => `<tr><td>${esc(item.receiptNo || "")}</td><td>${esc(formatDate(item.issueDate))}</td><td>${esc(formatDate(item.paymentDate))}</td><td>${esc(item.customer || "")}</td><td>${esc(item.invoiceNo || "")}</td><td class="num">${esc(yen(item.amount))}</td></tr>`).join("")}</tbody></table>` : `<p class="muted">この月の領収書はありません。</p>`}
 
   <h2>締め状況</h2>
   ${data.closings.length ? `<table><thead><tr><th>締め</th><th>状態</th><th>メモ</th><th>登録日時</th></tr></thead><tbody>${data.closings.map((item) => `<tr><td>${esc(item.closeType)}</td><td>${esc(item.status)}</td><td>${esc(item.note || "")}</td><td>${esc(formatDateTime(item.createdAt))}</td></tr>`).join("")}</tbody></table>` : `<p class="warn">この月の締め登録はありません。</p>`}
@@ -2379,6 +2947,59 @@
     downloadBlob(`見積書-${safeFilePart(estimate.estimateNo || estimate.id)}-${TODAY}.html`, new Blob([html], { type: "text/html;charset=utf-8" }));
   }
 
+  function exportDeliveryDocument(delivery) {
+    const html = businessDocumentHtml("delivery", delivery);
+    addAudit("納品書HTML発行", { id: delivery.id, deliveryNo: delivery.deliveryNo });
+    persist("納品書発行");
+    downloadBlob(`納品書-${safeFilePart(delivery.deliveryNo || delivery.id)}-${TODAY}.html`, new Blob([html], { type: "text/html;charset=utf-8" }));
+  }
+
+  function exportReceiptDocDocument(receiptDoc) {
+    const html = businessDocumentHtml("receipt", receiptDoc);
+    addAudit("領収書HTML発行", { id: receiptDoc.id, receiptNo: receiptDoc.receiptNo });
+    persist("領収書発行");
+    downloadBlob(`領収書-${safeFilePart(receiptDoc.receiptNo || receiptDoc.id)}-${TODAY}.html`, new Blob([html], { type: "text/html;charset=utf-8" }));
+  }
+
+  function createDeliveryFromEstimate(estimate) {
+    if (estimate.linkedDeliveryNo) {
+      alert("この見積にはすでに納品書番号が紐づいています。");
+      return;
+    }
+    if (isMonthLocked(recordMonth("estimates", estimate))) {
+      alert("この見積月は月末締めが完了しているため、納品書化できません。締め状態を確認してください。");
+      return;
+    }
+    const now = new Date().toISOString();
+    const deliveryNo = nextDeliveryNo();
+    const delivery = deliveryRecordFromData({
+      deliveryNo,
+      date: TODAY,
+      customer: estimate.customer,
+      subject: estimate.content,
+      itemName: estimate.content,
+      quantity: 1,
+      unit: "式",
+      unitPrice: estimate.amount,
+      amount: estimate.amount,
+      taxRate: "10%",
+      template: estimate.template || "標準",
+      sendStatus: "未送付",
+      linkedEstimateNo: estimate.estimateNo,
+      linkedInvoiceNo: estimate.linkedInvoiceNo,
+      note: [`見積 ${estimate.estimateNo || ""} から作成`, estimate.note].filter(Boolean).join(" / ")
+    });
+    delivery.createdAt = now;
+    state.deliveries.push(delivery);
+    estimate.linkedDeliveryNo = deliveryNo;
+    estimate.status = "受注";
+    estimate.updatedAt = now;
+    addAudit("見積から納品書化", { estimateNo: estimate.estimateNo, deliveryNo });
+    persist("納品書化");
+    alert(`納品書 ${deliveryNo} を作成しました。`);
+    renderEstimates();
+  }
+
   function createInvoiceFromEstimate(estimate) {
     if (estimate.linkedInvoiceNo) {
       alert("この見積にはすでに請求書番号が紐づいています。");
@@ -2405,6 +3026,11 @@
       amount: num(estimate.amount),
       taxRate: "10%",
       status: "未入金",
+      template: estimate.template || "標準",
+      sendStatus: "未送付",
+      sendDate: "",
+      linkedEstimateNo: estimate.estimateNo,
+      linkedDeliveryNo: estimate.linkedDeliveryNo || "",
       note: [`見積 ${estimate.estimateNo || ""} から作成`, estimate.note].filter(Boolean).join(" / "),
       createdAt: now
     };
@@ -2418,54 +3044,103 @@
     renderEstimates();
   }
 
+  function createInvoiceFromDelivery(delivery) {
+    if (delivery.linkedInvoiceNo) {
+      alert("この納品書にはすでに請求書番号が紐づいています。");
+      return;
+    }
+    if (isMonthLocked(recordMonth("deliveries", delivery))) {
+      alert("この納品月は月末締めが完了しているため、請求書化できません。締め状態を確認してください。");
+      return;
+    }
+    const now = new Date().toISOString();
+    const invoiceNo = nextInvoiceNo();
+    const invoice = {
+      id: uid("inv"),
+      invoiceNo,
+      issueDate: TODAY,
+      serviceDate: delivery.date || TODAY,
+      dueDate: endOfNextMonth(TODAY),
+      expectedPaymentDate: endOfNextMonth(TODAY),
+      paymentDate: "",
+      customer: delivery.customer,
+      content: delivery.subject || delivery.itemName,
+      classification: "業務委託",
+      department: departments()[0],
+      amount: num(delivery.amount),
+      taxRate: delivery.taxRate || "10%",
+      status: "未入金",
+      template: delivery.template || "標準",
+      sendStatus: "未送付",
+      sendDate: "",
+      linkedEstimateNo: delivery.linkedEstimateNo || "",
+      linkedDeliveryNo: delivery.deliveryNo,
+      note: [`納品書 ${delivery.deliveryNo || ""} から作成`, delivery.note].filter(Boolean).join(" / "),
+      createdAt: now
+    };
+    state.invoices.push(invoice);
+    delivery.linkedInvoiceNo = invoiceNo;
+    delivery.updatedAt = now;
+    const estimate = state.estimates.find((item) => item.estimateNo && item.estimateNo === delivery.linkedEstimateNo);
+    if (estimate) {
+      estimate.linkedInvoiceNo = invoiceNo;
+      estimate.updatedAt = now;
+    }
+    addAudit("納品書から請求書化", { deliveryNo: delivery.deliveryNo, invoiceNo });
+    persist("請求書化");
+    alert(`請求書 ${invoiceNo} を作成しました。`);
+    renderDeliveries();
+  }
+
+  function createReceiptFromInvoice(invoice) {
+    if (receiptExistsForInvoice(invoice.invoiceNo)) {
+      alert("この請求書番号の領収書はすでに作成されています。");
+      return;
+    }
+    const now = new Date().toISOString();
+    const receiptNo = nextReceiptNo();
+    const receiptDoc = receiptDocRecordFromData({
+      receiptNo,
+      issueDate: TODAY,
+      paymentDate: invoice.paymentDate || invoice.expectedPaymentDate || TODAY,
+      customer: invoice.customer,
+      invoiceNo: invoice.invoiceNo,
+      content: invoice.content || "お品代",
+      amount: invoice.amount,
+      taxRate: invoice.taxRate || "10%",
+      template: invoice.template || "標準",
+      sendStatus: "未送付",
+      note: [`請求書 ${invoice.invoiceNo || ""} から作成`, invoice.note].filter(Boolean).join(" / ")
+    });
+    receiptDoc.createdAt = now;
+    state.receiptDocs.push(receiptDoc);
+    invoice.linkedReceiptNo = receiptNo;
+    invoice.updatedAt = now;
+    addAudit("請求書から領収書化", { invoiceNo: invoice.invoiceNo, receiptNo });
+    persist("領収書化");
+    alert(`領収書 ${receiptNo} を作成しました。`);
+    renderInvoices();
+  }
+
   function businessDocumentHtml(type, record) {
-    const isInvoice = type === "invoice";
-    const title = isInvoice ? "請求書" : "見積書";
-    const number = isInvoice ? record.invoiceNo : record.estimateNo;
-    const partnerLabel = isInvoice ? "請求先" : "提出先";
-    const partner = record.customer || "";
-    const rows = isInvoice ? [
-      ["請求書番号", record.invoiceNo],
-      ["請求日", formatDate(record.issueDate)],
-      ["実施日", formatDate(record.serviceDate)],
-      ["支払期限", formatDate(record.dueDate)],
-      ["入金予定日", formatDate(record.expectedPaymentDate)],
-      ["入金日", formatDate(record.paymentDate)],
-      ["請求先", record.customer],
-      ["内容", record.content],
-      ["分類", record.classification],
-      ["部門", record.department],
-      ["税区分", record.taxRate || "未設定"],
-      ["状態", record.status],
-      ["振込先", state.settings.bankAccount || "道銀"],
-      ["税理士確認メモ", record.note]
-    ] : [
-      ["見積番号", record.estimateNo],
-      ["見積日", formatDate(record.date)],
-      ["提出先", record.customer],
-      ["内容", record.content],
-      ["分類", record.classification],
-      ["部門", record.department],
-      ["状態", record.status],
-      ["関連請求書番号", record.linkedInvoiceNo],
-      ["メモ", record.note]
-    ];
+    const meta = documentMeta(type, record);
+    const accent = documentTemplateAccent(record.template);
 
     return `<!doctype html>
 <html lang="ja">
 <head>
   <meta charset="utf-8">
-  <title>${esc(title)} ${esc(number || "")}</title>
+  <title>${esc(meta.title)} ${esc(meta.number || "")}</title>
   <style>
     body{font-family:"Yu Gothic",Meiryo,sans-serif;background:#f3f6fa;color:#182235;margin:0;line-height:1.65}
     .sheet{max-width:860px;margin:24px auto;background:#fff;padding:44px;border:1px solid #d7deea}
-    .top{display:flex;justify-content:space-between;gap:24px;border-bottom:3px solid #2f5f9f;padding-bottom:18px}
+    .top{display:flex;justify-content:space-between;gap:24px;border-bottom:3px solid ${accent};padding-bottom:18px}
     h1{font-size:32px;margin:0;letter-spacing:0}.number{font-size:14px;color:#637087;margin-top:8px}
     .company{text-align:right}.company strong{font-size:18px}.muted{color:#637087}.partner{font-size:20px;margin:26px 0 18px}
     table{width:100%;border-collapse:collapse;margin-top:18px}th,td{border:1px solid #d8dee8;padding:10px 12px;text-align:left;vertical-align:top}th{width:210px;background:#e8f1fb}
-    .amount{margin:28px 0;padding:18px 22px;background:#eef5ff;border-left:5px solid #2f5f9f;display:flex;justify-content:space-between;align-items:baseline}
+    .amount{margin:28px 0;padding:18px 22px;background:#eef5ff;border-left:5px solid ${accent};display:flex;justify-content:space-between;align-items:baseline}
     .amount span{font-size:15px}.amount strong{font-size:30px}.note{margin-top:22px;padding:14px;background:#fff8e6;border:1px solid #ead8a6}
-    .actions{margin-top:22px}.button{border:1px solid #2f5f9f;background:#2f5f9f;color:#fff;border-radius:4px;padding:9px 16px;cursor:pointer}
+    .actions{margin-top:22px}.button{border:1px solid ${accent};background:${accent};color:#fff;border-radius:4px;padding:9px 16px;cursor:pointer}
     @media print{body{background:#fff}.sheet{margin:0;border:0}.actions{display:none}}
   </style>
 </head>
@@ -2473,26 +3148,336 @@
   <main class="sheet">
     <div class="top">
       <div>
-        <h1>${esc(title)}</h1>
-        <div class="number">${esc(number || "")}</div>
+        <h1>${esc(meta.title)}</h1>
+        <div class="number">${esc(meta.number || "")}</div>
       </div>
       <div class="company">
         <strong>${esc(state.settings.companyName || "CDP北海道")}</strong><br>
         <span class="muted">出力日 ${esc(formatDate(TODAY))}</span>
       </div>
     </div>
-    <div class="partner">${esc(partner || partnerLabel)} 御中</div>
-    <div class="amount"><span>${esc(title)}金額</span><strong>${esc(yen(record.amount))}</strong></div>
-    <table><tbody>${rows.map(([label, value]) => `<tr><th>${esc(label)}</th><td>${esc(value || "")}</td></tr>`).join("")}</tbody></table>
+    <div class="partner">${esc(meta.partner || meta.partnerLabel)}</div>
+    <div class="amount"><span>${esc(meta.amountLabel)}</span><strong>${esc(yen(record.amount))}</strong></div>
+    <table><tbody>${meta.rows.map(([label, value]) => `<tr><th>${esc(label)}</th><td>${esc(value || "")}</td></tr>`).join("")}</tbody></table>
     <div class="note">
-      ${isInvoice
-        ? "請求日、実施日、支払期限、入金予定日、入金日を会計判断用に残しています。決算またぎや売上計上日は担当税理士に確認してください。"
-        : "見積書は記録として保存し、受注後は見積一覧から請求書化できます。金額や条件に変更がある場合は請求書化前に見積を編集してください。"}
+      ${esc(meta.note)}
     </div>
     <div class="actions"><button class="button" onclick="window.print()">印刷</button></div>
   </main>
 </body>
 </html>`;
+  }
+
+  function documentMeta(type, record) {
+    const title = documentTypeLabel(type);
+    const number = documentNumber(type, record);
+    const partnerLabel = type === "estimate" ? "提出先" : "取引先";
+    const partner = partnerDisplay(record.customer);
+    const rows = documentRows(type, record);
+    const notes = {
+      estimate: "見積書は記録として保存し、受注後は納品書化または請求書化できます。金額や条件に変更がある場合は変換前に編集してください。",
+      delivery: "納品書は見積・請求書とのつながりを残します。請求書化後も納品日と内容を確認できるよう保存してください。",
+      invoice: "請求日、実施日、支払期限、入金予定日、入金日を会計判断用に残しています。決算またぎや売上計上日は担当税理士に確認してください。",
+      receipt: "領収書は入金後に相手へ渡す控えです。請求書番号と入金日を残し、売上とのずれを確認してください。"
+    };
+    return {
+      title,
+      number,
+      partnerLabel,
+      partner: partner || `${partnerLabel} 御中`,
+      amountLabel: type === "receipt" ? "領収金額" : `${title}金額`,
+      rows,
+      note: notes[type] || "帳票として保存します。"
+    };
+  }
+
+  function documentRows(type, record) {
+    if (type === "invoice") {
+      return [
+        ["請求書番号", record.invoiceNo],
+        ["請求日", formatDate(record.issueDate)],
+        ["実施日", formatDate(record.serviceDate)],
+        ["支払期限", formatDate(record.dueDate)],
+        ["入金予定日", formatDate(record.expectedPaymentDate)],
+        ["入金日", formatDate(record.paymentDate)],
+        ["請求先", record.customer],
+        ["内容", record.content],
+        ["分類", record.classification],
+        ["部門", record.department],
+        ["税区分", record.taxRate || "未設定"],
+        ["状態", record.status],
+        ["送付状態", record.sendStatus],
+        ["送付日", formatDate(record.sendDate)],
+        ["関連見積番号", record.linkedEstimateNo],
+        ["関連納品書番号", record.linkedDeliveryNo],
+        ["関連領収書番号", record.linkedReceiptNo],
+        ["振込先", state.settings.bankAccount || "道銀"],
+        ["税理士確認メモ", record.note]
+      ];
+    }
+    if (type === "delivery") {
+      return [
+        ["納品書番号", record.deliveryNo],
+        ["納品日", formatDate(record.date)],
+        ["取引先", record.customer],
+        ["件名", record.subject],
+        ["品目", record.itemName],
+        ["数量", [record.quantity, record.unit].filter(Boolean).join(" ")],
+        ["単価", yen(record.unitPrice)],
+        ["税区分", record.taxRate],
+        ["送付状態", record.sendStatus],
+        ["送付日", formatDate(record.sendDate)],
+        ["関連見積番号", record.linkedEstimateNo],
+        ["関連請求書番号", record.linkedInvoiceNo],
+        ["備考", record.note]
+      ];
+    }
+    if (type === "receipt") {
+      return [
+        ["領収書番号", record.receiptNo],
+        ["発行日", formatDate(record.issueDate)],
+        ["入金日", formatDate(record.paymentDate)],
+        ["取引先", record.customer],
+        ["請求書番号", record.invoiceNo],
+        ["但し書き・内容", record.content],
+        ["税区分", record.taxRate],
+        ["送付状態", record.sendStatus],
+        ["送付日", formatDate(record.sendDate)],
+        ["備考", record.note]
+      ];
+    }
+    return [
+      ["見積番号", record.estimateNo],
+      ["見積日", formatDate(record.date)],
+      ["提出先", record.customer],
+      ["内容", record.content],
+      ["分類", record.classification],
+      ["部門", record.department],
+      ["状態", record.status],
+      ["送付状態", record.sendStatus],
+      ["送付日", formatDate(record.sendDate)],
+      ["関連納品書番号", record.linkedDeliveryNo],
+      ["関連請求書番号", record.linkedInvoiceNo],
+      ["メモ", record.note]
+    ];
+  }
+
+  function businessDocumentPreviewHtml(type, record) {
+    const meta = documentMeta(type, record);
+    return `
+      <div class="preview-sheet">
+        <div class="preview-top">
+          <strong>${esc(meta.title)}</strong>
+          <span>${esc(meta.number || "")}</span>
+        </div>
+        <div class="preview-partner">${esc(meta.partner || meta.partnerLabel)}</div>
+        <div class="preview-amount"><span>${esc(meta.amountLabel)}</span><strong>${esc(yen(record.amount))}</strong></div>
+        <dl class="preview-list">
+          ${meta.rows.slice(0, 8).map(([label, value]) => `<dt>${esc(label)}</dt><dd>${esc(value || "")}</dd>`).join("")}
+        </dl>
+      </div>
+    `;
+  }
+
+  function bindDocumentPreview(formId, previewId, type) {
+    const form = document.getElementById(formId);
+    const preview = document.getElementById(previewId);
+    if (!form || !preview) return;
+    const update = () => {
+      const data = formValues(form);
+      const record = type === "delivery" ? deliveryRecordFromData(data, false) : receiptDocRecordFromData(data, false);
+      preview.innerHTML = businessDocumentPreviewHtml(type, record);
+    };
+    form.addEventListener("input", update);
+    form.addEventListener("change", update);
+    update();
+  }
+
+  function deliveryRecordFromData(data, withId = true) {
+    const master = itemByName(data.itemName || data.subject || data.content);
+    const quantity = num(data.quantity) || 1;
+    const unitPrice = num(data.unitPrice) || num(master && master.unitPrice);
+    const amount = num(data.amount) || Math.round(quantity * unitPrice);
+    return {
+      ...(withId ? { id: uid("del") } : {}),
+      deliveryNo: data.deliveryNo || nextDeliveryNo(),
+      date: data.date || TODAY,
+      customer: data.customer,
+      subject: data.subject || data.content || data.itemName,
+      itemName: data.itemName || data.content || (master && master.itemName) || "",
+      quantity,
+      unit: data.unit || (master && master.unit) || "式",
+      unitPrice,
+      amount,
+      taxRate: data.taxRate || (master && master.taxRate) || "10%",
+      template: data.template || "標準",
+      sendStatus: data.sendStatus || "未送付",
+      sendDate: data.sendDate,
+      linkedEstimateNo: data.linkedEstimateNo,
+      linkedInvoiceNo: data.linkedInvoiceNo,
+      note: data.note,
+      createdAt: new Date().toISOString()
+    };
+  }
+
+  function receiptDocRecordFromData(data, withId = true) {
+    return {
+      ...(withId ? { id: uid("receiptDoc") } : {}),
+      receiptNo: data.receiptNo || nextReceiptNo(),
+      issueDate: data.issueDate || TODAY,
+      paymentDate: data.paymentDate || TODAY,
+      customer: data.customer,
+      invoiceNo: data.invoiceNo,
+      content: data.content || "お品代",
+      amount: num(data.amount),
+      taxRate: data.taxRate || "10%",
+      template: data.template || "標準",
+      sendStatus: data.sendStatus || "未送付",
+      sendDate: data.sendDate,
+      note: data.note,
+      createdAt: new Date().toISOString()
+    };
+  }
+
+  function createRecurringDocument(template) {
+    if (!template.active) {
+      alert("無効なルールです。有効にしてから作成してください。");
+      return;
+    }
+    const month = TODAY.slice(0, 7);
+    if (template.lastCreatedMonth === month) {
+      alert("このルールは今月分をすでに作成しています。");
+      return;
+    }
+    const scheduledDate = dateInMonth(month, template.dayOfMonth || 15);
+    if (template.documentType === "delivery") {
+      const delivery = deliveryRecordFromData({
+        deliveryNo: nextDeliveryNo(),
+        date: scheduledDate,
+        customer: template.customer,
+        subject: template.content,
+        itemName: template.content,
+        quantity: 1,
+        unit: "式",
+        unitPrice: template.amount,
+        amount: template.amount,
+        taxRate: template.taxRate,
+        template: template.template,
+        sendStatus: "未送付",
+        note: [`毎月自動: ${template.title || ""}`, template.note].filter(Boolean).join(" / ")
+      });
+      state.deliveries.push(delivery);
+      addAudit("毎月自動 納品書作成", delivery);
+    } else if (template.documentType === "receipt") {
+      const receiptDoc = receiptDocRecordFromData({
+        receiptNo: nextReceiptNo(),
+        issueDate: scheduledDate,
+        paymentDate: scheduledDate,
+        customer: template.customer,
+        invoiceNo: "",
+        content: template.content,
+        amount: template.amount,
+        taxRate: template.taxRate,
+        template: template.template,
+        sendStatus: "未送付",
+        note: [`毎月自動: ${template.title || ""}`, template.note].filter(Boolean).join(" / ")
+      });
+      state.receiptDocs.push(receiptDoc);
+      addAudit("毎月自動 領収書作成", receiptDoc);
+    } else {
+      const invoice = {
+        id: uid("inv"),
+        invoiceNo: nextInvoiceNo(),
+        issueDate: scheduledDate,
+        serviceDate: scheduledDate,
+        dueDate: endOfNextMonth(scheduledDate),
+        expectedPaymentDate: endOfNextMonth(scheduledDate),
+        paymentDate: "",
+        customer: template.customer,
+        content: template.content,
+        classification: template.classification || "業務委託",
+        department: template.department || departments()[0],
+        amount: num(template.amount),
+        taxRate: template.taxRate || "10%",
+        status: "未入金",
+        template: template.template || "標準",
+        sendStatus: "未送付",
+        sendDate: "",
+        note: [`毎月自動: ${template.title || ""}`, template.note].filter(Boolean).join(" / "),
+        createdAt: new Date().toISOString()
+      };
+      state.invoices.push(invoice);
+      addAudit("毎月自動 請求書作成", invoice);
+    }
+    template.lastCreatedMonth = month;
+    template.updatedAt = new Date().toISOString();
+    persist("毎月自動作成");
+    alert(`${month}分の${documentTypeLabel(template.documentType)}を作成しました。`);
+    renderRecurring();
+  }
+
+  function salesFlowRows() {
+    const estimates = fiscalItems(state.estimates, "date").sort(byDate("date"));
+    const deliveries = fiscalItems(state.deliveries, "date").sort(byDate("date"));
+    const invoices = fiscalInvoices().sort(byDate("issueDate"));
+    const sales = fiscalItems(state.sales, "date").sort(byDate("date"));
+    const receiptDocs = fiscalItems(state.receiptDocs, "issueDate").sort(byDate("issueDate"));
+    const usedDeliveries = new Set();
+    const usedInvoices = new Set();
+    const usedSales = new Set();
+    const usedReceipts = new Set();
+
+    const rows = estimates.map((estimate) => {
+      const delivery = deliveries.find((item) => item.linkedEstimateNo && item.linkedEstimateNo === estimate.estimateNo)
+        || deliveries.find((item) => item.deliveryNo && item.deliveryNo === estimate.linkedDeliveryNo);
+      const invoice = invoices.find((item) => item.linkedEstimateNo && item.linkedEstimateNo === estimate.estimateNo)
+        || invoices.find((item) => item.invoiceNo && item.invoiceNo === estimate.linkedInvoiceNo)
+        || (delivery ? invoices.find((item) => item.linkedDeliveryNo && item.linkedDeliveryNo === delivery.deliveryNo) : null);
+      const sale = invoice ? sales.find((item) => item.invoiceNo && item.invoiceNo === invoice.invoiceNo) : null;
+      const receipt = invoice ? receiptDocs.find((item) => item.invoiceNo && item.invoiceNo === invoice.invoiceNo) : null;
+      if (delivery) usedDeliveries.add(delivery.id);
+      if (invoice) usedInvoices.add(invoice.id);
+      if (sale) usedSales.add(sale.id);
+      if (receipt) usedReceipts.add(receipt.id);
+      return flowRow(estimate.date, estimate.customer, estimate.content, estimate.amount, estimate, delivery, invoice, sale, receipt);
+    });
+
+    deliveries.filter((item) => !usedDeliveries.has(item.id)).forEach((delivery) => {
+      const invoice = invoices.find((item) => item.linkedDeliveryNo && item.linkedDeliveryNo === delivery.deliveryNo)
+        || invoices.find((item) => item.invoiceNo && item.invoiceNo === delivery.linkedInvoiceNo);
+      const sale = invoice ? sales.find((item) => item.invoiceNo && item.invoiceNo === invoice.invoiceNo) : null;
+      const receipt = invoice ? receiptDocs.find((item) => item.invoiceNo && item.invoiceNo === invoice.invoiceNo) : null;
+      if (invoice) usedInvoices.add(invoice.id);
+      if (sale) usedSales.add(sale.id);
+      if (receipt) usedReceipts.add(receipt.id);
+      rows.push(flowRow(delivery.date, delivery.customer, delivery.subject || delivery.itemName, delivery.amount, null, delivery, invoice, sale, receipt));
+    });
+
+    invoices.filter((item) => !usedInvoices.has(item.id)).forEach((invoice) => {
+      const sale = sales.find((item) => item.invoiceNo && item.invoiceNo === invoice.invoiceNo);
+      const receipt = receiptDocs.find((item) => item.invoiceNo && item.invoiceNo === invoice.invoiceNo);
+      if (sale) usedSales.add(sale.id);
+      if (receipt) usedReceipts.add(receipt.id);
+      rows.push(flowRow(invoice.issueDate, invoice.customer, invoice.content, invoice.amount, null, null, invoice, sale, receipt));
+    });
+
+    sales.filter((item) => !usedSales.has(item.id)).forEach((sale) => rows.push(flowRow(sale.date, sale.customer, sale.content, sale.amount, null, null, null, sale, null)));
+    receiptDocs.filter((item) => !usedReceipts.has(item.id)).forEach((receipt) => rows.push(flowRow(receipt.issueDate, receipt.customer, receipt.content, receipt.amount, null, null, null, null, receipt)));
+    return rows.sort((a, b) => String(a.date || "").localeCompare(String(b.date || "")));
+  }
+
+  function flowRow(date, customer, content, amount, estimate, delivery, invoice, sale, receipt) {
+    return { date, customer, content, amount: num(amount), estimate, delivery, invoice, sale, receipt };
+  }
+
+  function salesFlowIssueBadges(row) {
+    const badges = [];
+    if (row.invoice && !row.sale) badges.push('<span class="badge warn">入金未確認</span>');
+    if (row.sale && !row.invoice) badges.push('<span class="badge warn">請求書なし入金</span>');
+    if (row.invoice && row.sale && num(row.invoice.amount) !== num(row.sale.amount)) badges.push('<span class="badge bad">金額差</span>');
+    if (row.sale && !row.receipt) badges.push('<span class="badge warn">領収書未発行</span>');
+    if (row.invoice && fiscalCrossing(row.invoice)) badges.push('<span class="badge bad">決算またぎ</span>');
+    return badges.join(" ") || '<span class="badge good">確認済</span>';
   }
 
   async function importAllData(event) {
@@ -2954,7 +3939,7 @@
       id: uid("audit"),
       at: new Date().toISOString(),
       action,
-      target: payload ? [payload.invoiceNo, payload.estimateNo, payload.vendor, payload.customer, payload.id].filter(Boolean).join(" / ") : ""
+      target: payload ? [payload.invoiceNo, payload.estimateNo, payload.deliveryNo, payload.receiptNo, payload.name, payload.itemName, payload.title, payload.vendor, payload.customer, payload.id].filter(Boolean).join(" / ") : ""
     });
     if (state.audit.length > 1000) state.audit = state.audit.slice(-1000);
   }
@@ -2982,6 +3967,10 @@
     return `<label class="field"><span>${esc(label)}</span><input name="${esc(name)}" type="${esc(type)}" value="${esc(value || "")}" ${placeholder ? `placeholder="${esc(placeholder)}"` : ""}></label>`;
   }
 
+  function textFieldWithList(name, label, value, listId, placeholder) {
+    return `<label class="field"><span>${esc(label)}</span><input name="${esc(name)}" type="text" value="${esc(value || "")}" list="${esc(listId)}" ${placeholder ? `placeholder="${esc(placeholder)}"` : ""}></label>`;
+  }
+
   function selectField(name, label, options, selected) {
     const optionHtml = options.map((option) => {
       const value = Array.isArray(option) ? option[0] : option;
@@ -2989,6 +3978,16 @@
       return `<option value="${esc(value)}" ${String(value) === String(selected) ? "selected" : ""}>${esc(text)}</option>`;
     }).join("");
     return `<label class="field"><span>${esc(label)}</span><select name="${esc(name)}">${optionHtml}</select></label>`;
+  }
+
+  function partnerDatalist() {
+    const options = partnerNames().map((name) => `<option value="${esc(name)}"></option>`).join("");
+    return `<datalist id="partnerNameList">${options}</datalist>`;
+  }
+
+  function itemDatalist() {
+    const options = itemNames().map((name) => `<option value="${esc(name)}"></option>`).join("");
+    return `<datalist id="itemNameList">${options}</datalist>`;
   }
 
   function summaryCard(label, value, sub) {
@@ -3042,6 +4041,39 @@
 
   function departments() {
     return Array.isArray(state.settings.departments) && state.settings.departments.length ? state.settings.departments : defaultDepartments;
+  }
+
+  function documentTemplates() {
+    return ["標準", "フォーマル", "控えめ"];
+  }
+
+  function sendStatuses() {
+    return ["未送付", "送付済", "再送予定", "郵送済", "保留"];
+  }
+
+  function partnerNames() {
+    return [...new Set((state.partners || []).map((item) => clean(item.name)).filter(Boolean))];
+  }
+
+  function itemNames() {
+    return [...new Set((state.items || []).map((item) => clean(item.itemName)).filter(Boolean))];
+  }
+
+  function partnerByName(name) {
+    const target = clean(name);
+    return (state.partners || []).find((item) => clean(item.name) === target) || null;
+  }
+
+  function itemByName(name) {
+    const target = clean(name);
+    return (state.items || []).find((item) => clean(item.itemName) === target || clean(item.itemCode) === target) || null;
+  }
+
+  function partnerDisplay(name) {
+    const partner = partnerByName(name);
+    const base = clean(name);
+    const honorific = partner && partner.honorific && partner.honorific !== "なし" ? partner.honorific : "御中";
+    return base ? `${base} ${honorific}` : "";
   }
 
   function fiscalItems(items, dateKey) {
@@ -3136,6 +4168,69 @@
 
   function nextEstimateNo() {
     return `EST-${selectedFiscalYear}-${String(state.estimates.length + 1).padStart(4, "0")}`;
+  }
+
+  function nextDeliveryNo() {
+    return `DEL-${selectedFiscalYear}-${String(state.deliveries.length + 1).padStart(4, "0")}`;
+  }
+
+  function nextReceiptNo() {
+    return `REC-${selectedFiscalYear}-${String(state.receiptDocs.length + 1).padStart(4, "0")}`;
+  }
+
+  function documentTypeLabel(type) {
+    return {
+      estimate: "見積書",
+      invoice: "請求書",
+      delivery: "納品書",
+      receipt: "領収書"
+    }[type] || type;
+  }
+
+  function documentNumber(type, record) {
+    return {
+      estimate: record.estimateNo,
+      invoice: record.invoiceNo,
+      delivery: record.deliveryNo,
+      receipt: record.receiptNo
+    }[type] || "";
+  }
+
+  function documentTemplateAccent(template) {
+    if (template === "フォーマル") return "#243f63";
+    if (template === "控えめ") return "#4f6f61";
+    return "#2f5f9f";
+  }
+
+  function receiptExistsForInvoice(invoiceNo) {
+    if (!invoiceNo) return false;
+    return state.receiptDocs.some((item) => item.invoiceNo && item.invoiceNo === invoiceNo);
+  }
+
+  function dateInMonth(month, day) {
+    const lastDay = Number(endOfMonth(`${month}-01`).slice(8, 10));
+    const safeDay = String(Math.min(Math.max(1, Number(day) || 1), lastDay)).padStart(2, "0");
+    return `${month}-${safeDay}`;
+  }
+
+  function partnerCsvFields() {
+    return [["name", "取引先名"], ["honorific", "敬称"], ["contact", "担当者"], ["email", "メール"], ["phone", "電話"], ["paymentTerms", "支払条件"], ["address", "住所・送付先"], ["bankInfo", "振込先・条件"], ["note", "メモ"]];
+  }
+
+  function itemCsvFields() {
+    return [["itemCode", "品番"], ["itemName", "品目名"], ["category", "分類"], ["unitPrice", "標準単価"], ["unit", "単位"], ["taxRate", "税率"], ["note", "メモ"]];
+  }
+
+  function deliveryCsvFields() {
+    return [["deliveryNo", "納品書番号"], ["date", "納品日"], ["customer", "取引先"], ["subject", "件名"], ["itemName", "品目"], ["quantity", "数量"], ["unit", "単位"], ["unitPrice", "単価"], ["amount", "金額"], ["taxRate", "税区分"], ["linkedEstimateNo", "関連見積番号"], ["linkedInvoiceNo", "関連請求書番号"], ["sendStatus", "送付状態"], ["sendDate", "送付日"], ["template", "テンプレート"], ["note", "備考"]];
+  }
+
+  function receiptDocCsvFields() {
+    return [["receiptNo", "領収書番号"], ["issueDate", "発行日"], ["paymentDate", "入金日"], ["customer", "取引先"], ["invoiceNo", "請求書番号"], ["content", "内容"], ["amount", "金額"], ["taxRate", "税区分"], ["sendStatus", "送付状態"], ["sendDate", "送付日"], ["template", "テンプレート"], ["note", "備考"]];
+  }
+
+  function recurringCsvFields() {
+    return [["title", "ルール名"], ["documentType", "帳票"], ["dayOfMonth", "作成日"], ["customer", "取引先"], ["content", "内容"], ["amount", "金額"], ["classification", "分類"], ["department", "部門"], ["taxRate", "税区分"], ["template", "テンプレート"], ["active", "有効"], ["lastCreatedMonth", "最終作成月"], ["note", "メモ"]];
   }
 
   function detectPayment(text) {
@@ -3256,10 +4351,41 @@
       invoiceEligible: "インボイス適格",
       note: "メモ",
       invoiceNo: "請求書番号",
+      estimateNo: "見積番号",
+      deliveryNo: "納品書番号",
+      receiptNo: "領収書番号",
       customer: "取引先",
       content: "内容",
       classification: "分類",
       status: "状態",
+      subject: "件名",
+      unit: "単位",
+      issueDate: "発行日",
+      paymentDate: "入金日",
+      dueDate: "支払期限",
+      expectedPaymentDate: "入金予定日",
+      serviceDate: "実施日",
+      sendStatus: "送付状態",
+      sendDate: "送付日",
+      template: "テンプレート",
+      linkedEstimateNo: "関連見積番号",
+      linkedDeliveryNo: "関連納品書番号",
+      linkedInvoiceNo: "関連請求書番号",
+      linkedReceiptNo: "関連領収書番号",
+      name: "取引先名",
+      honorific: "敬称",
+      contact: "担当者",
+      email: "メール",
+      phone: "電話",
+      paymentTerms: "支払条件",
+      address: "住所・送付先",
+      bankInfo: "振込先・条件メモ",
+      itemCode: "品番",
+      title: "ルール名",
+      documentType: "帳票",
+      dayOfMonth: "作成日",
+      active: "有効",
+      lastCreatedMonth: "最終作成月",
       createdAt: "登録日時"
     };
     return labels[key] || key;

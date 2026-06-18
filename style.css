@@ -55,6 +55,7 @@ label.file-button {
   position: sticky;
   top: 0;
   height: 100vh;
+  overflow-y: auto;
 }
 
 .brand {
@@ -241,6 +242,99 @@ h3 {
   display: grid;
   gap: 12px;
   grid-template-columns: repeat(4, minmax(160px, 1fr));
+}
+
+.document-builder {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(280px, 0.75fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.document-builder .form-grid {
+  grid-template-columns: repeat(3, minmax(150px, 1fr));
+}
+
+.document-builder .form-grid datalist {
+  display: none;
+}
+
+.document-preview-panel {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f7f9fc;
+  padding: 14px;
+  min-width: 0;
+}
+
+.document-preview-panel h3 {
+  margin-bottom: 10px;
+}
+
+.document-preview {
+  min-height: 260px;
+}
+
+.preview-sheet {
+  background: #fff;
+  border: 1px solid #d7deea;
+  border-radius: 6px;
+  padding: 18px;
+  box-shadow: 0 8px 18px rgba(24, 34, 53, 0.06);
+}
+
+.preview-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 2px solid var(--nav);
+  padding-bottom: 10px;
+}
+
+.preview-top strong {
+  font-size: 20px;
+}
+
+.preview-top span,
+.preview-list dd {
+  color: var(--muted);
+}
+
+.preview-partner {
+  margin: 18px 0 12px;
+  font-weight: 800;
+}
+
+.preview-amount {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: baseline;
+  background: var(--blue-soft);
+  border-left: 4px solid var(--nav);
+  padding: 12px;
+  margin-bottom: 14px;
+}
+
+.preview-amount strong {
+  font-size: 22px;
+}
+
+.preview-list {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 6px 10px;
+  margin: 0;
+  font-size: 13px;
+}
+
+.preview-list dt {
+  font-weight: 800;
+}
+
+.preview-list dd {
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 
 .field {
@@ -813,6 +907,10 @@ dialog::backdrop {
   .form-grid {
     grid-template-columns: repeat(2, minmax(160px, 1fr));
   }
+
+  .document-builder {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 760px) {
@@ -849,6 +947,7 @@ dialog::backdrop {
   .grid.cols-3,
   .grid.cols-4,
   .filter-bar,
+  .document-builder .form-grid,
   .form-grid {
     grid-template-columns: 1fr;
   }
