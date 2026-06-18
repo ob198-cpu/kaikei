@@ -238,6 +238,84 @@ h3 {
   font-size: 13px;
 }
 
+.approval-board {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(170px, 1fr));
+  gap: 12px;
+}
+
+.approval-lane {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f7f9fc;
+  min-width: 0;
+}
+
+.approval-lane-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+  padding: 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.approval-lane-sub {
+  padding: 8px 10px 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.approval-lane-body {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  min-height: 120px;
+}
+
+.approval-card {
+  display: grid;
+  gap: 7px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.approval-card-top,
+.approval-card-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+}
+
+.approval-card-main {
+  font-weight: 800;
+}
+
+.approval-card-meta,
+.approval-card-foot span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.approval-card .actions {
+  gap: 6px;
+}
+
+.approval-empty {
+  display: grid;
+  place-items: center;
+  min-height: 68px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
 .form-grid {
   display: grid;
   gap: 12px;
@@ -1057,6 +1135,10 @@ dialog::backdrop {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .approval-board {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .health-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -1107,6 +1189,7 @@ dialog::backdrop {
   .grid.cols-2,
   .grid.cols-3,
   .grid.cols-4,
+  .approval-board,
   .filter-bar,
   .document-builder .form-grid,
   .form-grid {

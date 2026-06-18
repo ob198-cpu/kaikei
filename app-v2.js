@@ -685,6 +685,14 @@
       </div>
 
       <section class="panel" style="margin-top:14px;">
+        <div class="panel-head"><h2>承認ワークフロー</h2><span class="badge">${requests.length}件</span></div>
+        <div class="panel-body">
+          <div class="notice info" style="margin-bottom:12px;">下書き、差し戻し、承認待ち、支払待ち、支払済みを列で確認します。期限超過や期限が近い支払依頼を先に処理できます。</div>
+          ${renderApprovalWorkflowBoard(requests)}
+        </div>
+      </section>
+
+      <section class="panel" style="margin-top:14px;">
         <div class="panel-head">
           <h2>支払依頼・事前申請</h2>
           <button class="button secondary small" id="exportPaymentRequestsCsv" type="button">CSV</button>
@@ -721,6 +729,58 @@
     document.getElementById("exportPaymentRequestsCsv").addEventListener("click", () => exportCsv("payment-requests", requests, paymentRequestCsvFields()));
     bindPaymentRequestActions();
     bindTableActions();
+  }
+
+  function renderApprovalWorkflowBoard(requests) {
+    const lanes = [
+      { status: "下書き", title: "下書き", hint: "申請前" },
+      { status: "差し戻し", title: "差し戻し", hint: "修正して再申請" },
+      { status: "申請中", title: "承認待ち", hint: "承認または差戻し" },
+      { status: "承認済", title: "支払待ち", hint: "支払済みに更新" },
+      { status: "支払済", title: "支払済", hint: "処理完了" }
+    ];
+    return `<div class="approval-board">${lanes.map((lane) => renderApprovalLane(lane, requests.filter((item) => item.status === lane.status))).join("")}</div>`;
+  }
+
+  function renderApprovalLane(lane, items) {
+    return `
+      <section class="approval-lane">
+        <div class="approval-lane-head">
+          <strong>${esc(lane.title)}</strong>
+          <span class="badge">${items.length}件</span>
+        </div>
+        <div class="approval-lane-sub">${esc(lane.hint)} / ${yen(sum(items, "amount"))}</div>
+        <div class="approval-lane-body">
+          ${items.length ? items.map(renderApprovalCard).join("") : '<div class="approval-empty">対象なし</div>'}
+        </div>
+      </section>
+    `;
+  }
+
+  function renderApprovalCard(item) {
+    return `
+      <article class="approval-card">
+        <div class="approval-card-top">
+          <strong>${esc(item.requestNo || "")}</strong>
+          ${paymentRequestDueBadge(item)}
+        </div>
+        <div class="approval-card-main">${esc(item.vendor || "支払先未入力")}</div>
+        <div class="approval-card-meta">${esc(item.content || "内容未入力")}</div>
+        <div class="approval-card-foot">
+          <span>${esc(formatDate(item.dueDate)) || "期限未入力"}</span>
+          <strong>${yen(item.amount)}</strong>
+        </div>
+        <div class="actions">${paymentRequestActionButtons(item)}</div>
+      </article>
+    `;
+  }
+
+  function paymentRequestDueBadge(item) {
+    if (item.status === "支払済") return '<span class="badge good">完了</span>';
+    if (!item.dueDate) return '<span class="badge warn">期限未入力</span>';
+    if (item.dueDate < TODAY) return '<span class="badge bad">期限超過</span>';
+    if (daysBetween(TODAY, item.dueDate) <= 7) return '<span class="badge warn">期限近い</span>';
+    return '<span class="badge good">期限内</span>';
   }
 
   function handlePaymentRequestSubmit(event) {
