@@ -128,6 +128,11 @@
         bankAccount: "道銀",
         categories: expenseCategories,
         departments: defaultDepartments,
+        defaultDocumentTemplate: "標準",
+        documentAccentColor: "#2f5f9f",
+        documentLogoText: "CDP",
+        documentSealText: "CDP",
+        documentFooterNote: "本帳票は会計システムで作成し、発行履歴と送付履歴を保存しています。",
         backupReminderDays: 7,
         lastBackupAt: ""
       },
@@ -207,6 +212,11 @@
     }
     if (hasMojibake(normalized.settings.companyName)) normalized.settings.companyName = base.settings.companyName;
     if (hasMojibake(normalized.settings.bankAccount)) normalized.settings.bankAccount = base.settings.bankAccount;
+    if (!documentTemplates().includes(normalized.settings.defaultDocumentTemplate)) normalized.settings.defaultDocumentTemplate = base.settings.defaultDocumentTemplate;
+    if (!isHexColor(normalized.settings.documentAccentColor)) normalized.settings.documentAccentColor = base.settings.documentAccentColor;
+    if (!clean(normalized.settings.documentLogoText)) normalized.settings.documentLogoText = base.settings.documentLogoText;
+    if (!clean(normalized.settings.documentSealText)) normalized.settings.documentSealText = base.settings.documentSealText;
+    if (!clean(normalized.settings.documentFooterNote)) normalized.settings.documentFooterNote = base.settings.documentFooterNote;
     return normalized;
   }
 
@@ -642,7 +652,7 @@
             ${selectField("taxRate", "税区分", taxRates, "10%")}
             ${documentLinesEditor()}
             ${selectField("status", "状態", invoiceStatuses, "未入金")}
-            ${selectField("template", "テンプレート", documentTemplates(), "標準")}
+            ${selectField("template", "テンプレート", documentTemplates(), defaultDocumentTemplate())}
             ${selectField("sendStatus", "送付状態", sendStatuses(), "未送付")}
             ${field("sendDate", "送付日", "date", "")}
             <label class="field" style="grid-column:1 / -1;"><span>税理士確認メモ</span><textarea name="note" placeholder="決算またぎ、実施日の考え方、支払いとのずれなど"></textarea></label>
@@ -711,7 +721,7 @@
       taxRate: data.taxRate || "10%",
       lines,
       status: data.paymentDate ? "入金済" : data.status || "未入金",
-      template: data.template || "標準",
+      template: data.template || defaultDocumentTemplate(),
       sendStatus: data.sendStatus || "未送付",
       sendDate: data.sendDate,
       note: data.note,
@@ -743,7 +753,7 @@
             ${selectField("status", "状態", ["作成中", "提出済", "受注", "失注", "保留"], "作成中")}
             ${field("linkedDeliveryNo", "納品書番号", "text", "")}
             ${field("linkedInvoiceNo", "請求書番号", "text", "")}
-            ${selectField("template", "テンプレート", documentTemplates(), "標準")}
+            ${selectField("template", "テンプレート", documentTemplates(), defaultDocumentTemplate())}
             ${selectField("sendStatus", "送付状態", sendStatuses(), "未送付")}
             ${field("sendDate", "送付日", "date", "")}
             <label class="field" style="grid-column:1 / -1;"><span>メモ</span><textarea name="note"></textarea></label>
@@ -782,7 +792,7 @@
       status: data.status,
       linkedDeliveryNo: data.linkedDeliveryNo,
       linkedInvoiceNo: data.linkedInvoiceNo,
-      template: data.template || "標準",
+      template: data.template || defaultDocumentTemplate(),
       sendStatus: data.sendStatus || "未送付",
       sendDate: data.sendDate,
       note: data.note,
@@ -814,7 +824,7 @@
             ${field("amount", "金額", "number", "")}
             ${selectField("taxRate", "税区分", taxRates, "10%")}
             ${documentLinesEditor()}
-            ${selectField("template", "テンプレート", documentTemplates(), "標準")}
+            ${selectField("template", "テンプレート", documentTemplates(), defaultDocumentTemplate())}
             ${selectField("sendStatus", "送付状態", sendStatuses(), "未送付")}
             ${field("sendDate", "送付日", "date", "")}
             ${field("linkedEstimateNo", "関連見積番号", "text", "")}
@@ -868,7 +878,7 @@
             ${field("amount", "領収金額", "number", "")}
             ${selectField("taxRate", "税区分", taxRates, "10%")}
             ${documentLinesEditor()}
-            ${selectField("template", "テンプレート", documentTemplates(), "標準")}
+            ${selectField("template", "テンプレート", documentTemplates(), defaultDocumentTemplate())}
             ${selectField("sendStatus", "送付状態", sendStatuses(), "未送付")}
             ${field("sendDate", "送付日", "date", "")}
             <label class="field" style="grid-column:1 / -1;"><span>備考</span><textarea name="note"></textarea></label>
@@ -1020,7 +1030,7 @@
             ${selectField("classification", "分類", salesCategories, "業務委託")}
             ${selectField("department", "部門", departments(), departments()[0])}
             ${selectField("taxRate", "税区分", taxRates, "10%")}
-            ${selectField("template", "テンプレート", documentTemplates(), "標準")}
+            ${selectField("template", "テンプレート", documentTemplates(), defaultDocumentTemplate())}
             <label class="check-field"><input name="active" type="checkbox" checked> 有効</label>
             <label class="field" style="grid-column:1 / -1;"><span>メモ</span><textarea name="note"></textarea></label>
             <div class="actions" style="grid-column:1 / -1;"><button class="button" type="submit">ルール登録</button></div>
@@ -1053,7 +1063,7 @@
       classification: data.classification || "業務委託",
       department: data.department || departments()[0],
       taxRate: data.taxRate || "10%",
-      template: data.template || "標準",
+      template: data.template || defaultDocumentTemplate(),
       active: Boolean(formData.get("active")),
       lastCreatedMonth: "",
       note: data.note,
@@ -1882,6 +1892,11 @@
             ${field("bankAccount", "売上通帳", "text", state.settings.bankAccount || "道銀")}
             ${selectField("fiscalStartMonth", "決算開始月", Array.from({ length: 12 }, (_, index) => [String(index + 1), `${index + 1}月`]), String(state.settings.fiscalStartMonth || DEFAULT_FISCAL_START_MONTH))}
             ${field("backupReminderDays", "バックアップ警告日数", "number", state.settings.backupReminderDays || 7)}
+            ${selectField("defaultDocumentTemplate", "既定帳票テンプレート", documentTemplates(), defaultDocumentTemplate())}
+            ${field("documentAccentColor", "帳票カラー", "color", documentAccentColor())}
+            ${field("documentLogoText", "ロゴ表記", "text", state.settings.documentLogoText || "CDP")}
+            ${field("documentSealText", "印影表記", "text", state.settings.documentSealText || "CDP")}
+            <label class="field" style="grid-column:1 / -1;"><span>帳票フッター文</span><textarea name="documentFooterNote">${esc(state.settings.documentFooterNote || "")}</textarea></label>
             <label class="field" style="grid-column:1 / -1;"><span>税理士メモ</span><textarea name="accountantMemo">${esc(state.settings.accountantMemo || "")}</textarea></label>
             <label class="field" style="grid-column:1 / -1;"><span>経費科目</span><textarea name="categories">${esc(categories().join("\n"))}</textarea></label>
             <label class="field" style="grid-column:1 / -1;"><span>部門</span><textarea name="departments">${esc(departments().join("\n"))}</textarea></label>
@@ -1890,6 +1905,7 @@
               <button class="button danger" id="clearDataButton" type="button">全データ削除</button>
             </div>
           </form>
+          ${renderDocumentDesignPreview()}
         </div>
       </section>
 
@@ -1929,6 +1945,20 @@
     bindTrashActions();
   }
 
+  function renderDocumentDesignPreview() {
+    const brand = documentBrand(defaultDocumentTemplate());
+    return `
+      <div class="document-design-preview" style="--doc-accent:${esc(brand.accent)};">
+        <div class="preview-logo">${esc(brand.logoText)}</div>
+        <div>
+          <strong>${esc(state.settings.companyName || "CDP北海道")}</strong>
+          <span>${esc(brand.template)} / ${esc(brand.footerNote)}</span>
+        </div>
+        <div class="preview-seal">${esc(brand.sealText)}</div>
+      </div>
+    `;
+  }
+
   function handleSettingsSubmit(event) {
     event.preventDefault();
     const data = formValues(event.currentTarget);
@@ -1936,6 +1966,11 @@
     state.settings.bankAccount = data.bankAccount || "道銀";
     state.settings.fiscalStartMonth = Number(data.fiscalStartMonth) || DEFAULT_FISCAL_START_MONTH;
     state.settings.backupReminderDays = Math.max(1, Number(data.backupReminderDays) || 7);
+    state.settings.defaultDocumentTemplate = documentTemplates().includes(data.defaultDocumentTemplate) ? data.defaultDocumentTemplate : "標準";
+    state.settings.documentAccentColor = isHexColor(data.documentAccentColor) ? data.documentAccentColor : "#2f5f9f";
+    state.settings.documentLogoText = clean(data.documentLogoText) || "CDP";
+    state.settings.documentSealText = clean(data.documentSealText) || "CDP";
+    state.settings.documentFooterNote = clean(data.documentFooterNote) || defaultState().settings.documentFooterNote;
     state.settings.accountantMemo = data.accountantMemo;
     state.settings.categories = lines(data.categories);
     state.settings.departments = lines(data.departments);
@@ -3459,7 +3494,10 @@
 
   function businessDocumentHtml(type, record) {
     const meta = documentMeta(type, record);
-    const accent = documentTemplateAccent(record.template);
+    const brand = documentBrand(record.template);
+    const accent = brand.accent;
+    const amountBg = brand.template === "控えめ" ? "#f2f7f4" : brand.template === "フォーマル" ? "#eef2f8" : "#eef5ff";
+    const sheetPadding = brand.template === "控えめ" ? "36px" : "44px";
 
     return `<!doctype html>
 <html lang="ja">
@@ -3468,14 +3506,19 @@
   <title>${esc(meta.title)} ${esc(meta.number || "")}</title>
   <style>
     body{font-family:"Yu Gothic",Meiryo,sans-serif;background:#f3f6fa;color:#182235;margin:0;line-height:1.65}
-    .sheet{max-width:860px;margin:24px auto;background:#fff;padding:44px;border:1px solid #d7deea}
+    .sheet{max-width:860px;margin:24px auto;background:#fff;padding:${sheetPadding};border:1px solid #d7deea}
     .top{display:flex;justify-content:space-between;gap:24px;border-bottom:3px solid ${accent};padding-bottom:18px}
     h1{font-size:32px;margin:0;letter-spacing:0}.number{font-size:14px;color:#637087;margin-top:8px}
     .company{text-align:right}.company strong{font-size:18px}.muted{color:#637087}.partner{font-size:20px;margin:26px 0 18px}
+    .brand-head{display:flex;justify-content:flex-end;align-items:center;gap:12px}.brand-text{min-width:170px}
+    .logo-mark{display:inline-grid;place-items:center;min-width:44px;height:44px;border-radius:6px;background:${accent};color:#fff;font-weight:800;padding:0 8px}
+    .seal{display:inline-grid;place-items:center;width:58px;height:58px;border:2px solid ${accent};border-radius:50%;color:${accent};font-weight:800;font-size:13px;line-height:1.1}
+    .template-label{font-size:12px;color:${accent};font-weight:700}
     table{width:100%;border-collapse:collapse;margin-top:18px}th,td{border:1px solid #d8dee8;padding:10px 12px;text-align:left;vertical-align:top}th{width:210px;background:#e8f1fb}
     .lines th{width:auto}.lines td.num,.lines th.num{text-align:right;white-space:nowrap}.totals{max-width:420px;margin-left:auto}.totals th{width:auto}
-    .amount{margin:28px 0;padding:18px 22px;background:#eef5ff;border-left:5px solid ${accent};display:flex;justify-content:space-between;align-items:baseline}
+    .amount{margin:28px 0;padding:18px 22px;background:${amountBg};border-left:5px solid ${accent};display:flex;justify-content:space-between;align-items:baseline}
     .amount span{font-size:15px}.amount strong{font-size:30px}.note{margin-top:22px;padding:14px;background:#fff8e6;border:1px solid #ead8a6}
+    .doc-footer{margin-top:22px;border-top:1px solid #d8dee8;padding-top:12px;color:#637087;font-size:12px}
     .actions{margin-top:22px}.button{border:1px solid ${accent};background:${accent};color:#fff;border-radius:4px;padding:9px 16px;cursor:pointer}
     @media print{body{background:#fff}.sheet{margin:0;border:0}.actions{display:none}}
   </style>
@@ -3488,8 +3531,15 @@
         <div class="number">${esc(meta.number || "")}</div>
       </div>
       <div class="company">
-        <strong>${esc(state.settings.companyName || "CDP北海道")}</strong><br>
-        <span class="muted">出力日 ${esc(formatDate(TODAY))}</span>
+        <div class="brand-head">
+          <span class="logo-mark">${esc(brand.logoText)}</span>
+          <div class="brand-text">
+            <strong>${esc(state.settings.companyName || "CDP北海道")}</strong><br>
+            <span class="muted">出力日 ${esc(formatDate(TODAY))}</span><br>
+            <span class="template-label">${esc(brand.template)}</span>
+          </div>
+          <span class="seal">${esc(brand.sealText)}</span>
+        </div>
       </div>
     </div>
     <div class="partner">${esc(meta.partner || meta.partnerLabel)}</div>
@@ -3499,6 +3549,7 @@
     <div class="note">
       ${esc(meta.note)}
     </div>
+    <div class="doc-footer">${esc(brand.footerNote)}</div>
     <div class="actions"><button class="button" onclick="window.print()">印刷</button></div>
   </main>
 </body>
@@ -3612,11 +3663,18 @@
 
   function businessDocumentPreviewHtml(type, record) {
     const meta = documentMeta(type, record);
+    const brand = documentBrand(record.template);
     return `
-      <div class="preview-sheet">
+      <div class="preview-sheet" style="--doc-accent:${esc(brand.accent)};">
         <div class="preview-top">
-          <strong>${esc(meta.title)}</strong>
-          <span>${esc(meta.number || "")}</span>
+          <div>
+            <strong>${esc(meta.title)}</strong>
+            <span>${esc(meta.number || "")}</span>
+          </div>
+          <div class="preview-brand">
+            <span class="preview-logo">${esc(brand.logoText)}</span>
+            <span class="preview-seal">${esc(brand.sealText)}</span>
+          </div>
         </div>
         <div class="preview-partner">${esc(meta.partner || meta.partnerLabel)}</div>
         <div class="preview-amount"><span>${esc(meta.amountLabel)}</span><strong>${esc(yen(meta.financial.total))}</strong></div>
@@ -3624,6 +3682,7 @@
         <dl class="preview-list">
           ${meta.rows.slice(0, 8).map(([label, value]) => `<dt>${esc(label)}</dt><dd>${esc(value || "")}</dd>`).join("")}
         </dl>
+        <div class="preview-footer">${esc(brand.footerNote)}</div>
       </div>
     `;
   }
@@ -3851,7 +3910,7 @@
       amount,
       taxRate: data.taxRate || (master && master.taxRate) || "10%",
       lines,
-      template: data.template || "標準",
+      template: data.template || defaultDocumentTemplate(),
       sendStatus: data.sendStatus || "未送付",
       sendDate: data.sendDate,
       linkedEstimateNo: data.linkedEstimateNo,
@@ -3874,7 +3933,7 @@
       amount: documentAmountFromLines(lines, data.amount),
       taxRate: data.taxRate || "10%",
       lines,
-      template: data.template || "標準",
+      template: data.template || defaultDocumentTemplate(),
       sendStatus: data.sendStatus || "未送付",
       sendDate: data.sendDate,
       note: data.note,
@@ -3954,7 +4013,7 @@
         taxRate: template.taxRate || "10%",
         lines: recurringLines,
         status: "未入金",
-        template: template.template || "標準",
+      template: template.template || defaultDocumentTemplate(),
         sendStatus: "未送付",
         sendDate: "",
         note: [`毎月自動: ${template.title || ""}`, template.note].filter(Boolean).join(" / "),
@@ -4598,7 +4657,26 @@
   }
 
   function documentTemplates() {
-    return ["標準", "フォーマル", "控えめ"];
+    return ["標準", "フォーマル", "控えめ", "ブランド"];
+  }
+
+  function defaultDocumentTemplate() {
+    return documentTemplates().includes(state.settings.defaultDocumentTemplate) ? state.settings.defaultDocumentTemplate : "標準";
+  }
+
+  function documentAccentColor() {
+    return isHexColor(state.settings.documentAccentColor) ? state.settings.documentAccentColor : "#2f5f9f";
+  }
+
+  function documentBrand(template) {
+    const templateName = documentTemplates().includes(template) ? template : defaultDocumentTemplate();
+    return {
+      template: templateName,
+      accent: documentTemplateAccent(templateName),
+      logoText: clean(state.settings.documentLogoText) || "CDP",
+      sealText: clean(state.settings.documentSealText) || "CDP",
+      footerNote: clean(state.settings.documentFooterNote) || defaultState().settings.documentFooterNote
+    };
   }
 
   function sendStatuses() {
@@ -4751,6 +4829,7 @@
   }
 
   function documentTemplateAccent(template) {
+    if (template === "ブランド") return documentAccentColor();
     if (template === "フォーマル") return "#243f63";
     if (template === "控えめ") return "#4f6f61";
     return "#2f5f9f";
@@ -4955,6 +5034,10 @@
 
   function clean(value) {
     return String(value || "").trim();
+  }
+
+  function isHexColor(value) {
+    return /^#[0-9a-f]{6}$/i.test(String(value || ""));
   }
 
   function num(value) {

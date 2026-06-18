@@ -340,13 +340,14 @@ h3 {
   border-radius: 6px;
   padding: 18px;
   box-shadow: 0 8px 18px rgba(24, 34, 53, 0.06);
+  --doc-accent: var(--nav);
 }
 
 .preview-top {
   display: flex;
   justify-content: space-between;
   gap: 12px;
-  border-bottom: 2px solid var(--nav);
+  border-bottom: 2px solid var(--doc-accent);
   padding-bottom: 10px;
 }
 
@@ -357,6 +358,38 @@ h3 {
 .preview-top span,
 .preview-list dd {
   color: var(--muted);
+}
+
+.preview-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.preview-logo {
+  display: inline-grid;
+  place-items: center;
+  min-width: 34px;
+  height: 34px;
+  border-radius: 6px;
+  background: var(--doc-accent);
+  color: #fff;
+  padding: 0 6px;
+  font-weight: 800;
+  font-size: 12px;
+}
+
+.preview-seal {
+  display: inline-grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border: 2px solid var(--doc-accent);
+  border-radius: 50%;
+  color: var(--doc-accent);
+  font-weight: 800;
+  font-size: 11px;
+  line-height: 1;
 }
 
 .preview-partner {
@@ -370,7 +403,7 @@ h3 {
   gap: 12px;
   align-items: baseline;
   background: var(--blue-soft);
-  border-left: 4px solid var(--nav);
+  border-left: 4px solid var(--doc-accent);
   padding: 12px;
   margin-bottom: 14px;
 }
@@ -418,6 +451,42 @@ h3 {
 
 .preview-lines strong {
   white-space: nowrap;
+}
+
+.preview-footer {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.document-design-preview {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  background: #f7f9fc;
+  --doc-accent: var(--nav);
+}
+
+.document-design-preview > div:nth-child(2) {
+  min-width: 0;
+  flex: 1;
+}
+
+.document-design-preview strong,
+.document-design-preview span {
+  display: block;
+}
+
+.document-design-preview span {
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
 }
 
 .field {
