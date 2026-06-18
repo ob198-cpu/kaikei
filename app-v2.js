@@ -373,24 +373,11 @@
 
         <section class="panel">
           <div class="panel-head">
-            <h2>改善済みの懸念</h2>
+            <h2>Money Forward機能対応</h2>
             <span class="badge good">10項目</span>
           </div>
           <div class="panel-body">
-            <div class="check-list">
-              ${[
-                "全体バックアップと復元",
-                "保存容量と最終バックアップ日",
-                "証憑未添付チェック",
-                "カード/現金/口座振込の識別",
-                "T番号と1万円以上の確認",
-                "請求書と売上入金の照合",
-                "金額差・期限超過・請求書なし売上の検出",
-                "決算またぎの税理士確認表示",
-                "削除を含む監査ログ",
-                "税理士提出パックの一括出力"
-              ].map((item) => `<span>✓ ${esc(item)}</span>`).join("")}
-            </div>
+            ${renderMoneyForwardFeatureChecks()}
           </div>
         </section>
       </div>
@@ -405,6 +392,34 @@
     });
     const packageButton = app.querySelector("[data-action='accountant-package']");
     if (packageButton) packageButton.addEventListener("click", exportAccountantPackage);
+  }
+
+  function renderMoneyForwardFeatureChecks() {
+    const checks = [
+      ["領収書作成", "入金後に相手へ渡す領収書を作成・HTML発行・送付状態管理", "receiptDocs"],
+      ["納品書作成", "納品番号、納品日、明細、請求書化まで管理", "deliveries"],
+      ["帳票変換", "見積 → 納品書 → 請求書 → 売上/領収書の変換導線を用意", "salesFlow"],
+      ["帳票プレビュー", "入力画面の右側で帳票完成形を即時プレビュー", "invoices"],
+      ["取引先マスタ", "住所、敬称、担当者、送付先、振込条件を保存", "partners"],
+      ["品目マスタ", "品番、品名、標準単価、単位、税率を保存して明細入力に利用", "items"],
+      ["テンプレート切替", "標準、フォーマル、控えめ、ブランドの帳票デザイン切替", "settings"],
+      ["送付管理", "未送付、送付済、再送予定、郵送済、送付履歴を管理", "sendManagement"],
+      ["毎月自動作成", "定期請求、定期納品、定期領収書の作成予定を管理", "recurring"],
+      ["販売管理台帳", "見積、納品、請求、入金、領収書まで案件単位で確認", "salesFlow"]
+    ];
+    return `
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>懸念</th><th>改善内容</th><th>状態</th><th>確認</th></tr></thead>
+          <tbody>${checks.map(([label, detail, view]) => `<tr>
+            <td><strong>${esc(label)}</strong></td>
+            <td>${esc(detail)}</td>
+            <td>${statusBadge("対応済")}</td>
+            <td><button class="button secondary small" data-view-jump="${esc(view)}" type="button">開く</button></td>
+          </tr>`).join("")}</tbody>
+        </table>
+      </div>
+    `;
   }
 
   function renderReceipts() {
@@ -5429,7 +5444,7 @@
 
   function statusBadge(value) {
     const text = value || "未処理";
-    const cls = ["完了", "入金済", "受注", "送付済", "郵送済", "メール", "郵送", "承認済", "支払済", "保管"].includes(text) ? "good" : ["期限超過", "保留", "失注", "差し戻し"].includes(text) ? "bad" : "warn";
+    const cls = ["完了", "対応済", "入金済", "受注", "送付済", "郵送済", "メール", "郵送", "承認済", "支払済", "保管"].includes(text) ? "good" : ["期限超過", "保留", "失注", "差し戻し"].includes(text) ? "bad" : "warn";
     return `<span class="badge ${cls}">${esc(text)}</span>`;
   }
 
