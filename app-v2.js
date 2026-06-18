@@ -634,7 +634,7 @@
           <h2>請求書登録</h2>
           <div class="actions"><button class="button secondary small" id="exportInvoicesCsv" type="button">CSV</button></div>
         </div>
-        <div class="panel-body">
+        <div class="panel-body document-builder">
           <form id="invoiceForm" class="form-grid">
             ${partnerDatalist()}
             ${itemDatalist()}
@@ -658,6 +658,10 @@
             <label class="field" style="grid-column:1 / -1;"><span>税理士確認メモ</span><textarea name="note" placeholder="決算またぎ、実施日の考え方、支払いとのずれなど"></textarea></label>
             <div class="actions" style="grid-column:1 / -1;"><button class="button" type="submit">請求書登録</button></div>
           </form>
+          <aside class="document-preview-panel">
+            <h3>作成プレビュー</h3>
+            <div id="invoicePreview" class="document-preview"></div>
+          </aside>
         </div>
       </section>
 
@@ -692,6 +696,7 @@
 
     document.getElementById("invoiceForm").addEventListener("submit", handleInvoiceSubmit);
     bindLineEditor("invoiceForm");
+    bindDocumentPreview("invoiceForm", "invoicePreview", "invoice");
     document.getElementById("exportInvoicesCsv").addEventListener("click", () => exportCsv("invoices", invoices, [
       ["invoiceNo", "請求書番号"], ["issueDate", "請求日"], ["serviceDate", "実施日"], ["dueDate", "支払期限"],
       ["expectedPaymentDate", "入金予定日"], ["paymentDate", "入金日"], ["customer", "請求先"], ["content", "内容"],
@@ -738,7 +743,7 @@
     app.innerHTML = `
       <section class="panel">
         <div class="panel-head"><h2>見積登録</h2><button class="button secondary small" id="exportEstimatesCsv" type="button">CSV</button></div>
-        <div class="panel-body">
+        <div class="panel-body document-builder">
           <form id="estimateForm" class="form-grid">
             ${partnerDatalist()}
             ${itemDatalist()}
@@ -759,6 +764,10 @@
             <label class="field" style="grid-column:1 / -1;"><span>メモ</span><textarea name="note"></textarea></label>
             <div class="actions" style="grid-column:1 / -1;"><button class="button" type="submit">見積登録</button></div>
           </form>
+          <aside class="document-preview-panel">
+            <h3>作成プレビュー</h3>
+            <div id="estimatePreview" class="document-preview"></div>
+          </aside>
         </div>
       </section>
       <section class="panel" style="margin-top:14px;">
@@ -768,6 +777,7 @@
     `;
     document.getElementById("estimateForm").addEventListener("submit", handleEstimateSubmit);
     bindLineEditor("estimateForm");
+    bindDocumentPreview("estimateForm", "estimatePreview", "estimate");
     document.getElementById("exportEstimatesCsv").addEventListener("click", () => exportCsv("estimates", estimates, [
       ["estimateNo", "見積番号"], ["date", "見積日"], ["customer", "提出先"], ["classification", "分類"],
       ["department", "部門"], ["content", "内容"], ["amount", "金額"], ["lines", "明細"], ["status", "状態"], ["linkedDeliveryNo", "納品書番号"], ["linkedInvoiceNo", "請求書番号"], ["sendStatus", "送付状態"], ["sendDate", "送付日"], ["template", "テンプレート"], ["note", "メモ"]
@@ -3693,7 +3703,7 @@
     if (!form || !preview) return;
     const update = () => {
       const data = formValues(form);
-      const record = type === "delivery" ? deliveryRecordFromData(data, false) : receiptDocRecordFromData(data, false);
+      const record = documentRecordFromData(type, data, false);
       preview.innerHTML = businessDocumentPreviewHtml(type, record);
     };
     form.addEventListener("input", update);
@@ -3889,6 +3899,66 @@
         ${lines.slice(0, 4).map((line) => `<div><span>${esc(line.itemName || "")}</span><strong>${esc(yen(lineLineAmount(line)))}</strong></div>`).join("")}
       </div>
     `;
+  }
+
+  function documentRecordFromData(type, data, withId = true) {
+    if (type === "invoice") return invoiceRecordFromData(data, withId);
+    if (type === "estimate") return estimateRecordFromData(data, withId);
+    if (type === "delivery") return deliveryRecordFromData(data, withId);
+    return receiptDocRecordFromData(data, withId);
+  }
+
+  function invoiceRecordFromData(data, withId = true) {
+    const lines = cloneDocumentLines(data).length ? cloneDocumentLines(data) : documentLinesFromData(data, { itemName: data.content, quantity: 1, unit: "式", unitPrice: data.amount, amount: data.amount, taxRate: data.taxRate });
+    return {
+      ...(withId ? { id: uid("inv") } : {}),
+      invoiceNo: data.invoiceNo || nextInvoiceNo(),
+      issueDate: data.issueDate || TODAY,
+      serviceDate: data.serviceDate || data.issueDate || TODAY,
+      dueDate: data.dueDate,
+      expectedPaymentDate: data.expectedPaymentDate,
+      paymentDate: data.paymentDate,
+      customer: data.customer,
+      content: data.content,
+      classification: data.classification,
+      department: data.department || departments()[0],
+      amount: documentAmountFromLines(lines, data.amount),
+      taxRate: data.taxRate || "10%",
+      lines,
+      status: data.paymentDate ? "入金済" : data.status || "未入金",
+      template: data.template || defaultDocumentTemplate(),
+      sendStatus: data.sendStatus || "未送付",
+      sendDate: data.sendDate,
+      linkedEstimateNo: data.linkedEstimateNo,
+      linkedDeliveryNo: data.linkedDeliveryNo,
+      linkedReceiptNo: data.linkedReceiptNo,
+      note: data.note,
+      createdAt: new Date().toISOString()
+    };
+  }
+
+  function estimateRecordFromData(data, withId = true) {
+    const lines = cloneDocumentLines(data).length ? cloneDocumentLines(data) : documentLinesFromData(data, { itemName: data.content, quantity: 1, unit: "式", unitPrice: data.amount, amount: data.amount, taxRate: data.taxRate || "10%" });
+    return {
+      ...(withId ? { id: uid("est") } : {}),
+      estimateNo: data.estimateNo || nextEstimateNo(),
+      date: data.date || TODAY,
+      customer: data.customer,
+      classification: data.classification,
+      department: data.department || departments()[0],
+      content: data.content,
+      amount: documentAmountFromLines(lines, data.amount),
+      taxRate: data.taxRate || "10%",
+      lines,
+      status: data.status,
+      linkedDeliveryNo: data.linkedDeliveryNo,
+      linkedInvoiceNo: data.linkedInvoiceNo,
+      template: data.template || defaultDocumentTemplate(),
+      sendStatus: data.sendStatus || "未送付",
+      sendDate: data.sendDate,
+      note: data.note,
+      createdAt: new Date().toISOString()
+    };
   }
 
   function deliveryRecordFromData(data, withId = true) {
