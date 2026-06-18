@@ -53,6 +53,7 @@
     receivedDocs: ["受領書類", "請求書、領収書、納品書など受け取った書類を保管"],
     expenses: ["経費表", "税理士の分類に合わせて品名、個数、単価、経費を管理"],
     approvals: ["申請・承認", "支払依頼、事前申請、承認、差し戻し、支払済みを管理"],
+    dataLink: ["データ連携", "通帳CSV、カード明細CSVの取込履歴と処理状況を管理"],
     sales: ["売上", "振込入金を売上として通帳別に管理"],
     invoices: ["請求書", "請求番号、実施日、支払予定日、入金日のずれを管理"],
     estimates: ["見積", "見積番号、金額、請求書化状況を記録"],
@@ -144,6 +145,7 @@
       expenses: [],
       receivedDocs: [],
       paymentRequests: [],
+      importBatches: [],
       sales: [],
       invoices: [],
       estimates: [],
@@ -192,6 +194,7 @@
       "expenses",
       "receivedDocs",
       "paymentRequests",
+      "importBatches",
       "sales",
       "invoices",
       "estimates",
@@ -219,6 +222,10 @@
     if (!Array.isArray(normalized.settings.departments) || !normalized.settings.departments.length || hasMojibake(normalized.settings.departments.join(""))) {
       normalized.settings.departments = defaultDepartments;
     }
+    normalized.importBatches = (normalized.importBatches || []).map((batch) => ({
+      ...batch,
+      importDate: batch.importDate || String(batch.importedAt || batch.createdAt || "").slice(0, 10)
+    }));
     if (hasMojibake(normalized.settings.companyName)) normalized.settings.companyName = base.settings.companyName;
     if (hasMojibake(normalized.settings.bankAccount)) normalized.settings.bankAccount = base.settings.bankAccount;
     if (!documentTemplates().includes(normalized.settings.defaultDocumentTemplate)) normalized.settings.defaultDocumentTemplate = base.settings.defaultDocumentTemplate;
@@ -280,6 +287,7 @@
       receivedDocs: renderReceivedDocs,
       expenses: renderExpenses,
       approvals: renderApprovals,
+      dataLink: renderDataLink,
       sales: renderSales,
       invoices: renderInvoices,
       estimates: renderEstimates,
@@ -1752,6 +1760,57 @@
     bindTableActions();
   }
 
+  function renderDataLink() {
+    const batches = fiscalItems(state.importBatches || [], "importDate")
+      .sort((a, b) => String(b.importedAt || "").localeCompare(String(a.importedAt || "")));
+    const bankBatches = batches.filter((item) => item.sourceType === "bank");
+    const cardBatches = batches.filter((item) => item.sourceType === "card");
+    const createdCount = sum(batches, "createdCount");
+    const latest = batches[0];
+
+    app.innerHTML = `
+      <section class="panel">
+        <div class="panel-head">
+          <h2>CSV取込</h2>
+          <div class="actions">
+            <label class="button secondary small file-button">通帳CSV取込<input id="dataLinkSalesImport" type="file" accept=".csv,text/csv"></label>
+            <label class="button secondary small file-button">カードCSV取込<input id="dataLinkCardImport" type="file" accept=".csv,text/csv"></label>
+          </div>
+        </div>
+        <div class="panel-body">
+          <div class="grid cols-4">
+            ${summaryCard("取込履歴", `${batches.length}件`, latest ? `最新 ${formatDateTime(latest.importedAt)}` : "まだ取込はありません")}
+            ${summaryCard("通帳CSV", `${sum(bankBatches, "createdCount")}件`, `${bankBatches.length}回 / 売上一覧へ登録`)}
+            ${summaryCard("カードCSV", `${sum(cardBatches, "createdCount")}件`, `${cardBatches.length}回 / カード経費へ登録`)}
+            ${summaryCard("取込金額", yen(sum(batches, "amountTotal")), `登録 ${createdCount}件`)}
+          </div>
+          <div class="notice info" style="margin-top:12px;">
+            通帳CSVは売上一覧へ、カードCSVはカード支払の経費として登録します。取込履歴は税理士提出パックにも含めます。
+          </div>
+          <div class="actions" style="margin-top:12px;">
+            <button class="button secondary small" data-view-jump="sales" type="button">売上一覧を確認</button>
+            <button class="button secondary small" data-view-jump="cards" type="button">カード台帳を確認</button>
+            <button class="button secondary small" id="exportImportBatchCsv" type="button">取込履歴CSV</button>
+          </div>
+        </div>
+      </section>
+      <section class="panel" style="margin-top:14px;">
+        <div class="panel-head"><h2>取込履歴</h2><span class="badge">${batches.length}件</span></div>
+        <div class="panel-body">
+          ${renderImportBatchTable(batches)}
+        </div>
+      </section>
+    `;
+
+    document.getElementById("dataLinkSalesImport").addEventListener("change", importSalesCsv);
+    document.getElementById("dataLinkCardImport").addEventListener("change", importCardCsv);
+    document.getElementById("exportImportBatchCsv").addEventListener("click", () => exportCsv("import-history", batches, importBatchCsvFields()));
+    app.querySelectorAll("[data-view-jump]").forEach((button) => {
+      button.addEventListener("click", () => switchView(button.dataset.viewJump));
+    });
+    bindTableActions();
+  }
+
   function renderClosing() {
     const months = fiscalMonths(selectedFiscalYear);
     const closings = state.closings.filter((item) => item.month && getFiscalYear(`${item.month}-01`) === selectedFiscalYear);
@@ -2332,6 +2391,7 @@
     if (collection === "deliveries") return record.date || "";
     if (collection === "receivedDocs") return record.receivedDate || record.dueDate || "";
     if (collection === "paymentRequests") return record.requestDate || record.dueDate || "";
+    if (collection === "importBatches") return record.importedAt || "";
     if (collection === "partners" || collection === "items" || collection === "recurringDocs") return "";
     if (collection === "payroll") return record.payDate || (record.payMonth ? `${record.payMonth}-01` : "");
     if (collection === "closings") return record.month ? `${record.month}-01` : "";
@@ -2343,6 +2403,7 @@
     if (collection === "expenses") return [record.vendor, record.itemName, record.category].filter(Boolean).join(" / ");
     if (collection === "receivedDocs") return [record.documentType, record.vendor, record.title, record.status].filter(Boolean).join(" / ");
     if (collection === "paymentRequests") return [record.requestNo, record.vendor, record.content, record.status].filter(Boolean).join(" / ");
+    if (collection === "importBatches") return [record.fileName, importTargetLabel(record.target), record.createdCount ? `${record.createdCount}件` : "", record.status].filter(Boolean).join(" / ");
     if (collection === "sales") return [record.customer, record.content, record.invoiceNo].filter(Boolean).join(" / ");
     if (collection === "invoices") return [record.invoiceNo, record.customer, record.content].filter(Boolean).join(" / ");
     if (collection === "estimates") return [record.estimateNo, record.customer, record.content].filter(Boolean).join(" / ");
@@ -2363,6 +2424,7 @@
       expenses: "経費",
       receivedDocs: "受領書類",
       paymentRequests: "申請・承認",
+      importBatches: "データ連携",
       sales: "売上",
       invoices: "請求書",
       estimates: "見積",
@@ -2645,6 +2707,45 @@
         </table>
       </div>
     `;
+  }
+
+  function renderImportBatchTable(items) {
+    if (!items.length) return `<div class="empty">CSV取込履歴はまだありません。</div>`;
+    return `
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>取込日時</th><th>種別</th><th>ファイル名</th><th class="num">読取行</th><th class="num">登録件数</th><th class="num">取込金額</th><th>登録先</th><th>状態</th><th>メモ</th><th>操作</th></tr></thead>
+          <tbody>${items.map((item) => `<tr>
+            <td>${esc(formatDateTime(item.importedAt))}</td>
+            <td>${importSourceBadge(item.sourceType)}</td>
+            <td>${esc(item.fileName || "")}</td>
+            <td class="num">${esc(item.rowCount || 0)}</td>
+            <td class="num">${esc(item.createdCount || 0)}</td>
+            <td class="num">${yen(item.amountTotal)}</td>
+            <td>${esc(importTargetLabel(item.target))}</td>
+            <td>${statusBadge(item.status || "取込済")}</td>
+            <td>${esc(item.note || "")}</td>
+            <td>${importBatchActions(item)}</td>
+          </tr>`).join("")}</tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  function importSourceBadge(sourceType) {
+    if (sourceType === "bank") return '<span class="badge bank">通帳</span>';
+    if (sourceType === "card") return '<span class="badge card">カード</span>';
+    return '<span class="badge">CSV</span>';
+  }
+
+  function importTargetLabel(target) {
+    if (target === "sales") return "売上一覧";
+    if (target === "expenses") return "経費表・カード台帳";
+    return target || "";
+  }
+
+  function importBatchActions(item) {
+    return `<div class="actions"><button class="button small secondary" data-action="detail" data-collection="importBatches" data-id="${esc(item.id)}" type="button">詳細</button><button class="button small danger" data-action="delete" data-collection="importBatches" data-id="${esc(item.id)}" type="button">削除</button></div>`;
   }
 
   function renderInvoiceTable(items) {
@@ -3531,6 +3632,7 @@
       expenses: fiscalItems(state.expenses, "date"),
       receivedDocs: fiscalItems(state.receivedDocs || [], "receivedDate"),
       paymentRequests: fiscalItems(state.paymentRequests || [], "requestDate"),
+      importBatches: fiscalItems(state.importBatches || [], "importDate"),
       sales: fiscalItems(state.sales, "date"),
       invoices: fiscalInvoices(),
       estimates: fiscalItems(state.estimates, "date"),
@@ -4697,12 +4799,32 @@
     }
   }
 
+  function recordImportBatch(batch) {
+    state.importBatches = Array.isArray(state.importBatches) ? state.importBatches : [];
+    state.importBatches.push({
+      id: uid("import"),
+      importedAt: new Date().toISOString(),
+      importDate: TODAY,
+      fiscalYear: selectedFiscalYear,
+      sourceType: batch.sourceType || "csv",
+      target: batch.target || "",
+      fileName: batch.fileName || "",
+      rowCount: num(batch.rowCount),
+      createdCount: num(batch.createdCount),
+      amountTotal: num(batch.amountTotal),
+      status: batch.status || "取込済",
+      note: batch.note || ""
+    });
+    if (state.importBatches.length > 300) state.importBatches = state.importBatches.slice(-300);
+  }
+
   async function importSalesCsv(event) {
     const file = event.target.files[0];
     if (!file) return;
     try {
       const rows = csvObjects(await file.text());
       let count = 0;
+      let amountTotal = 0;
       rows.forEach((row) => {
         const date = normalizeDateText(pick(row, ["入金日", "取引日", "日付", "年月日", "date"]));
         const amount = positiveAmount(pick(row, ["入金額", "金額", "取引金額", "amount"]));
@@ -4725,11 +4847,23 @@
         });
         markInvoicePaidFromSale(state.sales[state.sales.length - 1]);
         count += 1;
+        amountTotal += amount;
+      });
+      recordImportBatch({
+        sourceType: "bank",
+        target: "sales",
+        fileName: file.name,
+        rowCount: rows.length,
+        createdCount: count,
+        amountTotal,
+        status: "取込済",
+        note: "通帳CSVから売上一覧へ登録"
       });
       addAudit("通帳CSV取込", { id: `${file.name} ${count}件` });
       persist("CSV取込");
       alert(`${count}件の売上入金を取り込みました。`);
-      renderSales();
+      if (activeView === "dataLink") renderDataLink();
+      else renderSales();
     } catch (error) {
       console.error(error);
       alert("通帳CSVを読み込めませんでした。");
@@ -4744,6 +4878,7 @@
     try {
       const rows = csvObjects(await file.text());
       let count = 0;
+      let amountTotal = 0;
       rows.forEach((row) => {
         const date = normalizeDateText(pick(row, ["利用日", "取引日", "日付", "年月日", "date"]));
         const amount = positiveAmount(pick(row, ["利用金額", "金額", "取引金額", "amount"]));
@@ -4767,11 +4902,23 @@
           createdAt: new Date().toISOString()
         });
         count += 1;
+        amountTotal += amount;
+      });
+      recordImportBatch({
+        sourceType: "card",
+        target: "expenses",
+        fileName: file.name,
+        rowCount: rows.length,
+        createdCount: count,
+        amountTotal,
+        status: "取込済",
+        note: "カードCSVからカード支払の経費へ登録"
       });
       addAudit("カードCSV取込", { id: `${file.name} ${count}件` });
       persist("CSV取込");
       alert(`${count}件のカード経費を取り込みました。`);
-      renderCards();
+      if (activeView === "dataLink") renderDataLink();
+      else renderCards();
     } catch (error) {
       console.error(error);
       alert("カードCSVを読み込めませんでした。");
@@ -4818,6 +4965,21 @@
     exportCsv("books-compare", comparisonRows(entries, bookState.report), [
       ["label", "区分"], ["previous", "前期"], ["previousPercent", "前期構成比"], ["current", "当期"], ["currentPercent", "当期構成比"], ["diff", "増減額"], ["rate", "増減率"]
     ]);
+  }
+
+  function importBatchCsvFields() {
+    return [
+      ["importedAt", "取込日時"],
+      ["importDate", "取込日"],
+      ["sourceType", "種別"],
+      ["fileName", "ファイル名"],
+      ["rowCount", "読取行"],
+      ["createdCount", "登録件数"],
+      ["amountTotal", "取込金額"],
+      ["target", "登録先"],
+      ["status", "状態"],
+      ["note", "メモ"]
+    ];
   }
 
   function exportCsv(name, rows, fields) {
@@ -5605,8 +5767,10 @@
     if (value === null || value === undefined) return "";
     if (Array.isArray(value)) return key === "lines" ? documentLinesSummary(value) : JSON.stringify(value);
     if (key.toLowerCase().includes("date") || key === "createdAt" || key === "at") return String(value).includes("T") ? formatDateTime(value) : formatDate(value);
-    if (["amount", "unitPrice", "fuelClaim", "lodging", "total", "basePay", "allowance", "deduction", "netPay", "debit", "credit", "balance", "previous", "current", "diff"].includes(key)) return yen(value);
+    if (["amount", "amountTotal", "unitPrice", "fuelClaim", "lodging", "total", "basePay", "allowance", "deduction", "netPay", "debit", "credit", "balance", "previous", "current", "diff"].includes(key)) return yen(value);
     if (key === "paymentMethod") return paymentLabel(value);
+    if (key === "sourceType") return value === "bank" ? "通帳" : value === "card" ? "カード" : String(value);
+    if (key === "target") return importTargetLabel(value);
     if (typeof value === "boolean") return value ? "はい" : "いいえ";
     return String(value);
   }
@@ -5624,6 +5788,14 @@
       paymentMethod: "支払区分",
       paymentRequestNo: "支払依頼番号",
       paymentRequestStatus: "支払依頼状態",
+      importedAt: "取込日時",
+      importDate: "取込日",
+      sourceType: "取込種別",
+      fileName: "ファイル名",
+      rowCount: "読取行",
+      createdCount: "登録件数",
+      amountTotal: "取込金額",
+      target: "登録先",
       receivedDate: "受領日",
       documentType: "書類種別",
       file: "受領ファイル",
