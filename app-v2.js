@@ -1359,15 +1359,32 @@
 
   function renderSalesFlow() {
     const rows = salesFlowRows();
+    const completeRows = rows.filter(salesFlowIsComplete);
+    const issueRows = rows.filter((row) => salesFlowIssues(row).length);
+    const invoiceWithoutSale = rows.filter((row) => row.invoice && !row.sale);
+    const receiptMissing = rows.filter((row) => row.sale && !row.receipt);
     app.innerHTML = `
+      <div class="grid cols-4">
+        ${summaryCard("案件数", `${rows.length}件`, "見積・納品・請求・入金・領収をまとめた件数")}
+        ${summaryCard("完了", `${completeRows.length}件`, "請求・入金・領収書までそろった案件")}
+        ${summaryCard("要確認", `${issueRows.length}件`, "金額差、未入金、決算またぎなど")}
+        ${summaryCard("未入金/未領収", `${invoiceWithoutSale.length}/${receiptMissing.length}件`, "締め日前に確認する対象")}
+      </div>
       <section class="panel">
-        <div class="panel-head"><h2>販売管理台帳</h2><span class="badge">${rows.length}件</span></div>
+        <div class="panel-head">
+          <h2>販売管理台帳</h2>
+          <div class="actions">
+            <span class="badge">${rows.length}件</span>
+            <button class="button secondary small" id="exportSalesFlowCsv" type="button">CSV</button>
+          </div>
+        </div>
         <div class="panel-body">
           <div class="notice info" style="margin-bottom:12px;">見積 → 納品 → 請求 → 入金 → 領収書の流れを横並びで確認します。請求書があるのに入金がない、入金済みなのに領収書がない、という確認に使えます。</div>
           ${renderSalesFlowTable(rows)}
         </div>
       </section>
     `;
+    document.getElementById("exportSalesFlowCsv").addEventListener("click", () => exportCsv("sales-flow", rows.map(salesFlowCsvRow), salesFlowCsvFields()));
     bindTableActions();
   }
 
@@ -2860,9 +2877,9 @@
     if (!rows.length) return `<div class="empty">販売管理の対象データはまだありません。</div>`;
     return `
       <div class="table-wrap"><table>
-        <thead><tr><th>基準日</th><th>取引先</th><th>内容</th><th>見積</th><th>納品</th><th>請求</th><th>入金</th><th>領収</th><th class="num">金額</th><th>確認</th><th>次アクション</th></tr></thead>
+        <thead><tr><th>基準日</th><th>取引先</th><th>内容</th><th>進捗</th><th>見積</th><th>納品</th><th>請求</th><th>入金</th><th>領収</th><th class="num">金額</th><th>確認</th><th>次アクション</th></tr></thead>
         <tbody>${rows.map((row) => `<tr>
-          <td>${esc(formatDate(row.date))}</td><td>${esc(row.customer || "")}</td><td>${esc(row.content || "")}</td>
+          <td>${esc(formatDate(row.date))}</td><td>${esc(row.customer || "")}</td><td>${esc(row.content || "")}</td><td>${salesFlowProgressBadge(row)}</td>
           <td>${row.estimate ? `${statusBadge(row.estimate.status || "作成中")}<br>${esc(row.estimate.estimateNo || "")}` : '<span class="badge warn">なし</span>'}</td>
           <td>${row.delivery ? `${statusBadge(row.delivery.sendStatus || "未送付")}<br>${esc(row.delivery.deliveryNo || "")}` : '<span class="badge warn">なし</span>'}</td>
           <td>${row.invoice ? `${statusBadge(row.invoice.status || "未入金")}<br>${esc(row.invoice.invoiceNo || "")}` : '<span class="badge warn">なし</span>'}</td>
@@ -2891,6 +2908,35 @@
       actions.push(`<button class="button small secondary" data-action="invoice-to-receipt" data-id="${esc(row.invoice.id)}" type="button">領収書化</button>`);
     }
     return actions.length ? `<div class="actions">${actions.join("")}</div>` : '<span class="badge good">完了</span>';
+  }
+
+  function salesFlowProgress(row) {
+    if (row.sale && !row.invoice) return { label: "請求書なし入金", cls: "warn" };
+    if (row.invoice && row.sale && row.receipt) return { label: "完了", cls: "good" };
+    if (row.sale && !row.receipt) return { label: "領収書待ち", cls: "warn" };
+    if (row.invoice && !row.sale) return { label: "入金待ち", cls: "warn" };
+    if (row.delivery && !row.invoice) return { label: "請求待ち", cls: "warn" };
+    if (row.estimate && !row.delivery) return { label: "納品待ち", cls: "warn" };
+    if (row.receipt && !row.sale) return { label: "入金確認待ち", cls: "warn" };
+    return { label: "確認中", cls: "warn" };
+  }
+
+  function salesFlowProgressBadge(row) {
+    const progress = salesFlowProgress(row);
+    return `<span class="badge ${progress.cls}">${esc(progress.label)}</span>`;
+  }
+
+  function salesFlowIsComplete(row) {
+    return Boolean(row.invoice && row.sale && row.receipt && !salesFlowIssues(row).length);
+  }
+
+  function salesFlowNextActionLabel(row) {
+    if (row.estimate && !row.delivery) return "納品書化";
+    if (row.delivery && !row.invoice) return "請求書化";
+    if (row.estimate && !row.invoice) return "請求書化";
+    if (row.invoice && !row.sale) return "売上化";
+    if (row.invoice && row.sale && !row.receipt) return "領収書化";
+    return "完了";
   }
 
   function renderLedgerTable(type, items) {
@@ -4783,14 +4829,55 @@
     return { date, customer, content, amount: num(amount), estimate, delivery, invoice, sale, receipt };
   }
 
+  function salesFlowIssues(row) {
+    const issues = [];
+    if (row.invoice && !row.sale) issues.push({ label: "入金未確認", severity: "warn" });
+    if (row.sale && !row.invoice) issues.push({ label: "請求書なし入金", severity: "warn" });
+    if (row.invoice && row.sale && num(row.invoice.amount) !== num(row.sale.amount)) issues.push({ label: "金額差", severity: "bad" });
+    if (row.sale && !row.receipt) issues.push({ label: "領収書未発行", severity: "warn" });
+    if (row.invoice && fiscalCrossing(row.invoice)) issues.push({ label: "決算またぎ", severity: "bad" });
+    return issues;
+  }
+
   function salesFlowIssueBadges(row) {
-    const badges = [];
-    if (row.invoice && !row.sale) badges.push('<span class="badge warn">入金未確認</span>');
-    if (row.sale && !row.invoice) badges.push('<span class="badge warn">請求書なし入金</span>');
-    if (row.invoice && row.sale && num(row.invoice.amount) !== num(row.sale.amount)) badges.push('<span class="badge bad">金額差</span>');
-    if (row.sale && !row.receipt) badges.push('<span class="badge warn">領収書未発行</span>');
-    if (row.invoice && fiscalCrossing(row.invoice)) badges.push('<span class="badge bad">決算またぎ</span>');
-    return badges.join(" ") || '<span class="badge good">確認済</span>';
+    const issues = salesFlowIssues(row);
+    if (!issues.length) return '<span class="badge good">確認済</span>';
+    return issues.map((issue) => `<span class="badge ${issue.severity}">${esc(issue.label)}</span>`).join(" ");
+  }
+
+  function salesFlowCsvRow(row) {
+    const progress = salesFlowProgress(row);
+    return {
+      date: row.date,
+      customer: row.customer,
+      content: row.content,
+      progress: progress.label,
+      estimateNo: row.estimate ? row.estimate.estimateNo : "",
+      deliveryNo: row.delivery ? row.delivery.deliveryNo : "",
+      invoiceNo: row.invoice ? row.invoice.invoiceNo : "",
+      saleDate: row.sale ? row.sale.date : "",
+      receiptNo: row.receipt ? row.receipt.receiptNo : "",
+      amount: row.amount,
+      issues: salesFlowIssues(row).map((issue) => issue.label).join(" / "),
+      nextAction: salesFlowNextActionLabel(row)
+    };
+  }
+
+  function salesFlowCsvFields() {
+    return [
+      ["date", "基準日"],
+      ["customer", "取引先"],
+      ["content", "内容"],
+      ["progress", "進捗"],
+      ["estimateNo", "見積番号"],
+      ["deliveryNo", "納品書番号"],
+      ["invoiceNo", "請求書番号"],
+      ["saleDate", "入金日"],
+      ["receiptNo", "領収書番号"],
+      ["amount", "金額"],
+      ["issues", "確認"],
+      ["nextAction", "次アクション"]
+    ];
   }
 
   async function importAllData(event) {
