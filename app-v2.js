@@ -70,6 +70,7 @@
     hitech: ["ハイテク台帳", "送付資料、講師関連、入出金状況を記録"],
     books: ["会計帳簿", "総勘定元帳、補助元帳、試算表、推移表、部門別、前期比較"],
     closing: ["締め・提出", "15日前後と月末の締め、税理士提出データの点検"],
+    history: ["履歴", "操作履歴、削除済みデータ、出力履歴を確認"],
     settings: ["設定", "会社名、決算月、分類、バックアップ、データ保守"]
   };
 
@@ -118,10 +119,22 @@
   document.addEventListener("DOMContentLoaded", init);
 
   function init() {
+    ensureHistoryNav();
     seedFiscalOptions();
     bindGlobalEvents();
     persist("自動保存");
     render();
+  }
+
+  function ensureHistoryNav() {
+    const nav = document.querySelector(".nav");
+    if (!nav || nav.querySelector('[data-view="history"]')) return;
+    const button = document.createElement("button");
+    button.className = "nav-item";
+    button.dataset.view = "history";
+    button.type = "button";
+    button.textContent = "履歴";
+    nav.insertBefore(button, nav.querySelector('[data-view="settings"]'));
   }
 
   function defaultState() {
@@ -304,6 +317,7 @@
       hitech: () => renderSimpleLedger("hitech"),
       books: renderBooks,
       closing: renderClosing,
+      history: renderHistory,
       settings: renderSettings
     };
     (renderers[activeView] || renderDashboard)();
@@ -2356,6 +2370,63 @@
     bindTrashActions();
   }
 
+  function renderHistory() {
+    const auditRows = [...(state.audit || [])].reverse();
+    const trashRows = [...(state.trash || [])].reverse();
+    const recentRows = auditRows.filter((row) => row.at && daysBetween(row.at, new Date().toISOString()) <= 1);
+    const outputRows = auditRows.filter((row) => historyIsOutputAction(row.action));
+
+    app.innerHTML = `
+      <div class="grid cols-4">
+        ${summaryCard("操作履歴", `${auditRows.length}件`, "登録、編集、出力、変換の記録")}
+        ${summaryCard("直近24時間", `${recentRows.length}件`, "今日の作業確認")}
+        ${summaryCard("削除済み", `${trashRows.length}件`, "復元または完全削除の対象")}
+        ${summaryCard("出力履歴", `${outputRows.length}件`, "帳票発行、提出、バックアップ")}
+      </div>
+
+      <section class="panel" style="margin-top:14px;">
+        <div class="panel-head">
+          <h2>履歴エクスポート</h2>
+          <div class="actions">
+            <button class="button secondary small" id="exportAuditCsv" type="button">操作履歴CSV</button>
+            <button class="button secondary small" id="exportTrashCsv" type="button">削除済みCSV</button>
+            <button class="button secondary small" id="historyExportButton" type="button">全体バックアップ</button>
+            <button class="button secondary small" id="historyPackageButton" type="button">税理士提出パック</button>
+          </div>
+        </div>
+        <div class="panel-body">
+          <div class="notice info">Money Forwardの履歴画面の代わりに、誰が見ても「いつ何をしたか」「何を削除したか」「いつ提出用に出力したか」が追える画面です。</div>
+        </div>
+      </section>
+
+      <div class="grid cols-2" style="margin-top:14px;">
+        <section class="panel">
+          <div class="panel-head"><h2>出力・提出履歴</h2><span class="badge">${outputRows.length}件</span></div>
+          <div class="panel-body">${renderAuditTable(outputRows.slice(0, 80))}</div>
+        </section>
+        <section class="panel">
+          <div class="panel-head"><h2>直近の操作</h2><span class="badge">${recentRows.length}件</span></div>
+          <div class="panel-body">${renderAuditTable(auditRows.slice(0, 80))}</div>
+        </section>
+      </div>
+
+      <section class="panel" style="margin-top:14px;">
+        <div class="panel-head"><h2>削除済みデータ</h2><span class="badge">${trashRows.length}件</span></div>
+        <div class="panel-body">${renderTrashTable(trashRows.slice(0, 120))}</div>
+      </section>
+    `;
+
+    document.getElementById("exportAuditCsv").addEventListener("click", () => exportCsv("audit-log", auditRows, auditCsvFields()));
+    document.getElementById("exportTrashCsv").addEventListener("click", () => exportCsv("trash-log", trashRows.map(trashCsvRow), trashCsvFields()));
+    document.getElementById("historyExportButton").addEventListener("click", exportAllData);
+    document.getElementById("historyPackageButton").addEventListener("click", exportAccountantPackage);
+    bindTrashActions();
+  }
+
+  function historyIsOutputAction(action) {
+    return /出力|発行|バックアップ|提出パック|提出サマリー|月次提出/.test(String(action || ""));
+  }
+
   function renderDocumentDesignPreview() {
     const brand = documentBrand(defaultDocumentTemplate());
     return `
@@ -2450,7 +2521,8 @@
     state.trash = state.trash.filter((item) => item.id !== trashId);
     addAudit(`${collectionLabel(trashItem.collection)}復元`, record);
     persist("復元");
-    renderSettings();
+    if (activeView === "history") renderHistory();
+    else renderSettings();
   }
 
   function purgeTrashItem(trashId) {
@@ -2459,7 +2531,8 @@
     state.trash = (state.trash || []).filter((item) => item.id !== trashId);
     addAudit("削除済みデータ完全削除", trashItem || { id: trashId });
     persist("完全削除");
-    renderSettings();
+    if (activeView === "history") renderHistory();
+    else renderSettings();
   }
 
   function isMonthLocked(month) {
@@ -5144,6 +5217,37 @@
     ];
   }
 
+  function auditCsvFields() {
+    return [
+      ["at", "日時"],
+      ["action", "操作"],
+      ["target", "対象"]
+    ];
+  }
+
+  function trashCsvRow(item) {
+    const record = item.record || {};
+    return {
+      deletedAt: item.deletedAt || "",
+      collection: collectionLabel(item.collection),
+      date: recordDate(item.collection, record),
+      summary: recordSummary(item.collection, record),
+      amount: record.amount || record.total || record.netPay || "",
+      trashId: item.id
+    };
+  }
+
+  function trashCsvFields() {
+    return [
+      ["deletedAt", "削除日時"],
+      ["collection", "種類"],
+      ["date", "日付/月"],
+      ["summary", "内容"],
+      ["amount", "金額"],
+      ["trashId", "削除ID"]
+    ];
+  }
+
   function exportCsv(name, rows, fields) {
     const header = fields.map(([, label]) => label);
     const body = rows.map((row) => fields.map(([key]) => csvCell(displayValue(key, row[key]))));
@@ -5928,7 +6032,7 @@
   function displayValue(key, value) {
     if (value === null || value === undefined) return "";
     if (Array.isArray(value)) return key === "lines" ? documentLinesSummary(value) : JSON.stringify(value);
-    if (key.toLowerCase().includes("date") || key === "createdAt" || key === "at") return String(value).includes("T") ? formatDateTime(value) : formatDate(value);
+    if (key.toLowerCase().includes("date") || key === "createdAt" || key === "deletedAt" || key === "at") return String(value).includes("T") ? formatDateTime(value) : formatDate(value);
     if (["amount", "amountTotal", "unitPrice", "fuelClaim", "lodging", "total", "basePay", "allowance", "deduction", "netPay", "debit", "credit", "balance", "previous", "current", "diff"].includes(key)) return yen(value);
     if (key === "paymentMethod") return paymentLabel(value);
     if (key === "sourceType") return value === "bank" ? "通帳" : value === "card" ? "カード" : String(value);
