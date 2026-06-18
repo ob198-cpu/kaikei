@@ -54,6 +54,7 @@
     deliveries: ["納品書", "納品番号、納品日、請求書化状況を記録"],
     receiptDocs: ["領収書", "入金後に相手へ渡す領収書を作成"],
     salesFlow: ["販売管理", "見積、納品、請求、入金、領収書まで一連で確認"],
+    sendManagement: ["送付管理", "未送付帳票、メール文、郵送先、送付履歴を管理"],
     partners: ["取引先", "住所、敬称、担当者、送付先、振込条件を管理"],
     items: ["品目", "品名、標準単価、単位、税率を管理"],
     recurring: ["毎月自動", "毎月同じ請求、納品、領収書の作成予定を管理"],
@@ -139,6 +140,7 @@
       partners: [],
       items: [],
       recurringDocs: [],
+      sendLogs: [],
       trips: [],
       payroll: [],
       hitech: [],
@@ -184,6 +186,7 @@
       "partners",
       "items",
       "recurringDocs",
+      "sendLogs",
       "trips",
       "payroll",
       "hitech",
@@ -262,6 +265,7 @@
       deliveries: renderDeliveries,
       receiptDocs: renderReceiptDocs,
       salesFlow: renderSalesFlow,
+      sendManagement: renderSendManagement,
       partners: renderPartners,
       items: renderItems,
       recurring: renderRecurring,
@@ -1074,6 +1078,287 @@
     `;
   }
 
+  function renderSendManagement() {
+    const docs = sendDocuments();
+    const pending = docs.filter((doc) => !isSentStatus(doc.sendStatus));
+    const missingEmail = pending.filter((doc) => !doc.email);
+    const missingAddress = pending.filter((doc) => !doc.address);
+    const logs = fiscalSendLogs();
+    app.innerHTML = `
+      <div class="grid cols-4">
+        ${summaryCard("未送付", `${pending.length}件`, "メール文作成または送付済みにする対象")}
+        ${summaryCard("送付済み", `${docs.length - pending.length}件`, "メール送付・郵送済みの帳票")}
+        ${summaryCard("メール不足", `${missingEmail.length}件`, "取引先マスタにメールがない帳票")}
+        ${summaryCard("住所不足", `${missingAddress.length}件`, "郵送先住所がない帳票")}
+      </div>
+      <section class="panel" style="margin-top:14px;">
+        <div class="panel-head">
+          <h2>未送付・送付管理</h2>
+          <span class="badge">${docs.length}件</span>
+        </div>
+        <div class="panel-body">
+          <div class="notice info" style="margin-bottom:12px;">帳票を作ったあと、メール文作成・送付済み・郵送済みをここで記録します。金額や仕訳は変更せず、外部へ渡した証跡だけを残します。</div>
+          ${renderSendDocumentTable(docs)}
+        </div>
+      </section>
+      <section class="panel" style="margin-top:14px;">
+        <div class="panel-head">
+          <h2>送付履歴</h2>
+          <div class="actions">
+            <span class="badge">${logs.length}件</span>
+            <button class="button secondary small" id="exportSendLogsCsv" type="button">CSV</button>
+          </div>
+        </div>
+        <div class="panel-body">${renderSendLogTable(logs)}</div>
+      </section>
+    `;
+    document.getElementById("exportSendLogsCsv").addEventListener("click", () => exportCsv("send-logs", logs, sendLogCsvFields()));
+    bindTableActions();
+  }
+
+  function renderSendDocumentTable(docs) {
+    if (!docs.length) return `<div class="empty">送付管理の対象になる帳票はまだありません。</div>`;
+    return `
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>帳票</th><th>番号</th><th>日付</th><th>取引先</th><th>宛先</th><th>内容</th><th class="num">金額</th><th>状態</th><th>操作</th></tr></thead>
+          <tbody>${docs.map((doc) => `
+            <tr>
+              <td>${esc(doc.label)}</td>
+              <td>${esc(doc.number)}</td>
+              <td>${esc(formatDate(doc.date))}</td>
+              <td>${esc(doc.customer || "")}</td>
+              <td>
+                <div>${doc.email ? esc(doc.email) : '<span class="badge warn">メール未登録</span>'}</div>
+                <div class="sub">${doc.address ? esc(doc.address) : '<span class="badge warn">住所未登録</span>'}</div>
+              </td>
+              <td>${esc(doc.content || "")}</td>
+              <td class="num">${yen(doc.amount)}</td>
+              <td>${statusBadge(normalizedSendStatus(doc.sendStatus))} ${doc.sendDate ? esc(formatDate(doc.sendDate)) : ""}</td>
+              <td>${sendActionButtons(doc.collection, doc.id)}</td>
+            </tr>
+          `).join("")}</tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  function renderSendLogTable(logs) {
+    if (!logs.length) return `<div class="empty">送付履歴はまだありません。</div>`;
+    return `
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>記録日時</th><th>帳票</th><th>番号</th><th>取引先</th><th>方法</th><th>宛先</th><th class="num">金額</th><th>メモ</th></tr></thead>
+          <tbody>${logs.map((log) => `
+            <tr>
+              <td>${esc(formatDateTime(log.at))}</td>
+              <td>${esc(log.documentLabel || documentTypeLabel(log.documentType))}</td>
+              <td>${esc(log.documentNo || "")}</td>
+              <td>${esc(log.customer || "")}</td>
+              <td>${statusBadge(log.method || "")}</td>
+              <td>${esc(log.recipient || "")}</td>
+              <td class="num">${yen(log.amount)}</td>
+              <td>${esc(log.note || "")}</td>
+            </tr>
+          `).join("")}</tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  function sendDocuments() {
+    return [
+      ...fiscalItems(state.estimates, "date").map((record) => sendDocumentFromRecord("estimates", record)),
+      ...fiscalItems(state.deliveries, "date").map((record) => sendDocumentFromRecord("deliveries", record)),
+      ...fiscalInvoices().map((record) => sendDocumentFromRecord("invoices", record)),
+      ...fiscalItems(state.receiptDocs, "issueDate").map((record) => sendDocumentFromRecord("receiptDocs", record))
+    ].filter(Boolean).sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+  }
+
+  function sendDocumentFromRecord(collection, record) {
+    if (!record) return null;
+    const type = documentTypeForCollection(collection);
+    const partner = partnerByName(record.customer);
+    return {
+      collection,
+      id: record.id,
+      type,
+      label: documentTypeLabel(type),
+      number: documentNumber(type, record),
+      date: documentDateForSend(collection, record),
+      customer: record.customer || "",
+      content: documentContentForSend(type, record),
+      amount: num(record.amount),
+      sendStatus: record.sendStatus || "未送付",
+      sendDate: record.sendDate || "",
+      email: clean(record.email || (partner && partner.email)),
+      address: clean(record.address || (partner && partner.address)),
+      record
+    };
+  }
+
+  function documentTypeForCollection(collection) {
+    return {
+      estimates: "estimate",
+      deliveries: "delivery",
+      invoices: "invoice",
+      receiptDocs: "receipt"
+    }[collection] || collection;
+  }
+
+  function documentDateForSend(collection, record) {
+    if (collection === "invoices") return record.issueDate || record.serviceDate || record.expectedPaymentDate || "";
+    if (collection === "receiptDocs") return record.issueDate || record.paymentDate || "";
+    return record.date || "";
+  }
+
+  function documentContentForSend(type, record) {
+    if (type === "delivery") return record.subject || record.itemName || "";
+    return record.content || record.subject || record.itemName || "";
+  }
+
+  function fiscalSendLogs() {
+    const range = getFiscalRange(selectedFiscalYear);
+    return (state.sendLogs || [])
+      .filter((log) => {
+        const date = (log.documentDate || log.sentDate || log.at || "").slice(0, 10);
+        return date >= range.start && date <= range.end;
+      })
+      .sort((a, b) => String(b.at || "").localeCompare(String(a.at || "")));
+  }
+
+  function normalizedSendStatus(value) {
+    const text = clean(value);
+    if (!text || text === "譛ｪ騾∽ｻ・") return "未送付";
+    if (text === "騾∽ｻ俶ｸ・") return "送付済";
+    if (text === "驛ｵ騾∵ｸ・") return "郵送済";
+    if (text === "蜀埼∽ｺ亥ｮ・") return "再送予定";
+    if (text === "菫晉蕗") return "保留";
+    return text;
+  }
+
+  function isSentStatus(value) {
+    return ["送付済", "郵送済", "騾∽ｻ俶ｸ・", "驛ｵ騾∵ｸ・"].includes(clean(value));
+  }
+
+  function sendActionButtons(collection, id) {
+    return `<div class="actions">
+      <button class="button small secondary" data-action="send-draft" data-collection="${esc(collection)}" data-id="${esc(id)}" type="button">メール文</button>
+      <button class="button small secondary" data-action="mark-sent" data-method="メール" data-collection="${esc(collection)}" data-id="${esc(id)}" type="button">送付済</button>
+      <button class="button small secondary" data-action="mark-sent" data-method="郵送" data-collection="${esc(collection)}" data-id="${esc(id)}" type="button">郵送済</button>
+    </div>`;
+  }
+
+  function findBusinessDocument(collection, id) {
+    return (state[collection] || []).find((record) => record.id === id) || null;
+  }
+
+  function showSendDraft(collection, id) {
+    const record = findBusinessDocument(collection, id);
+    const doc = sendDocumentFromRecord(collection, record);
+    if (!doc) return;
+    const draft = sendDraftFor(doc);
+    dialogTitle.textContent = "送付メール文";
+    dialogBody.innerHTML = `
+      <div class="notice info" style="margin-bottom:12px;">HTML帳票を添付して送るための文面です。送信後は「送付済にする」で履歴に残せます。</div>
+      <dl class="detail-list">
+        <dt>帳票</dt><dd>${esc(doc.label)} ${esc(doc.number)}</dd>
+        <dt>取引先</dt><dd>${esc(doc.customer || "")}</dd>
+        <dt>メール</dt><dd>${doc.email ? esc(doc.email) : '<span class="badge warn">取引先マスタにメール未登録</span>'}</dd>
+        <dt>郵送先</dt><dd>${doc.address ? esc(doc.address) : '<span class="badge warn">住所未登録</span>'}</dd>
+      </dl>
+      <label class="field" style="margin-top:12px;"><span>件名</span><input id="sendDraftSubject" type="text" value="${esc(draft.subject)}"></label>
+      <label class="field" style="margin-top:12px;"><span>本文</span><textarea id="sendDraftBody" rows="10">${esc(draft.body)}</textarea></label>
+      <div class="actions" style="margin-top:14px;">
+        ${doc.email ? `<a class="button" id="openMailLink" href="${esc(mailtoFor(doc, draft.subject, draft.body))}">メールを開く</a>` : ""}
+        <button class="button secondary" data-action="dialog-mark-sent" data-method="メール" type="button">送付済にする</button>
+        <button class="button secondary" data-action="dialog-mark-sent" data-method="郵送" type="button">郵送済にする</button>
+      </div>
+    `;
+    const subjectInput = document.getElementById("sendDraftSubject");
+    const bodyInput = document.getElementById("sendDraftBody");
+    const mailLink = document.getElementById("openMailLink");
+    const refreshMailLink = () => {
+      if (mailLink) mailLink.href = mailtoFor(doc, subjectInput.value, bodyInput.value);
+    };
+    subjectInput.addEventListener("input", refreshMailLink);
+    bodyInput.addEventListener("input", refreshMailLink);
+    dialogBody.querySelectorAll("[data-action='dialog-mark-sent']").forEach((button) => {
+      button.addEventListener("click", () => {
+        markDocumentSent(collection, id, button.dataset.method, "送付管理ダイアログから記録");
+        dialog.close();
+      });
+    });
+    dialog.showModal();
+  }
+
+  function sendDraftFor(doc) {
+    const company = clean(state.settings.companyName) || "CDP北海道";
+    const subject = `${doc.label} ${doc.number} のご送付`;
+    const body = [
+      `${partnerDisplay(doc.customer) || doc.customer || "ご担当者"} `,
+      "",
+      "いつもお世話になっております。",
+      `${company}です。`,
+      "",
+      `${doc.label}（${doc.number}）をお送りします。`,
+      `内容: ${doc.content || "-"}`,
+      `金額: ${yen(doc.amount)}`,
+      `発行日: ${formatDate(doc.date) || "-"}`,
+      "",
+      "添付のHTML帳票をご確認ください。",
+      "よろしくお願いいたします。"
+    ].join("\n");
+    return { subject, body };
+  }
+
+  function mailtoFor(doc, subject, body) {
+    return `mailto:${encodeURIComponent(doc.email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  }
+
+  function markDocumentSent(collection, id, method = "メール", note = "") {
+    const record = findBusinessDocument(collection, id);
+    const doc = sendDocumentFromRecord(collection, record);
+    if (!record || !doc) return;
+    const status = method === "郵送" ? "郵送済" : "送付済";
+    record.sendStatus = status;
+    record.sendDate = TODAY;
+    record.updatedAt = new Date().toISOString();
+    recordSendLog(doc, method, status, note);
+    addAudit(`${doc.label}${status}`, record);
+    persist("送付記録");
+    render();
+  }
+
+  function recordSendLog(doc, method, status, note) {
+    const recipient = method === "郵送" ? doc.address : doc.email;
+    state.sendLogs = Array.isArray(state.sendLogs) ? state.sendLogs : [];
+    state.sendLogs.push({
+      id: uid("send"),
+      at: new Date().toISOString(),
+      sentDate: TODAY,
+      collection: doc.collection,
+      documentType: doc.type,
+      documentLabel: doc.label,
+      documentNo: doc.number,
+      documentDate: doc.date,
+      customer: doc.customer,
+      content: doc.content,
+      amount: doc.amount,
+      method,
+      status,
+      recipient: recipient || "",
+      note
+    });
+  }
+
+  function sendLogCsvFields() {
+    return [
+      ["at", "記録日時"], ["sentDate", "送付日"], ["documentLabel", "帳票"], ["documentNo", "番号"], ["documentDate", "帳票日"],
+      ["customer", "取引先"], ["content", "内容"], ["amount", "金額"], ["method", "方法"], ["status", "状態"], ["recipient", "宛先"], ["note", "メモ"]
+    ];
+  }
+
   function renderSimpleLedger(type) {
     const labels = {
       trips: ["出張台帳", "移動やガソリン請求を記録"],
@@ -1765,6 +2050,7 @@
     if (collection === "partners") return [record.name, record.contact].filter(Boolean).join(" / ");
     if (collection === "items") return [record.itemCode, record.itemName].filter(Boolean).join(" / ");
     if (collection === "recurringDocs") return [record.title, documentTypeLabel(record.documentType), record.customer].filter(Boolean).join(" / ");
+    if (collection === "sendLogs") return [record.documentLabel, record.documentNo, record.customer, record.method].filter(Boolean).join(" / ");
     if (collection === "trips") return [record.destination, record.purpose].filter(Boolean).join(" / ");
     if (collection === "payroll") return [record.payMonth, record.employee].filter(Boolean).join(" / ");
     if (collection === "hitech") return [record.sender, record.instructor, record.course].filter(Boolean).join(" / ");
@@ -1782,6 +2068,7 @@
       partners: "取引先",
       items: "品目",
       recurringDocs: "毎月自動",
+      sendLogs: "送付履歴",
       trips: "出張台帳",
       payroll: "給与台帳",
       hitech: "ハイテク台帳",
@@ -1996,7 +2283,7 @@
               <td>${esc(item.customer)}</td><td>${esc(item.content)}</td><td class="num">${yen(item.amount)}</td><td>${statusBadge(item.status)}</td>
               <td>${statusBadge(item.sendStatus || "未送付")} ${item.sendDate ? esc(formatDate(item.sendDate)) : ""}</td>
               <td>${crossing ? '<span class="badge bad">決算またぎ</span>' : ""} ${mismatch ? '<span class="badge bad">金額差</span>' : ""}</td>
-              <td>${rowActions("invoices", item.id)} <button class="button small secondary" data-action="issue-invoice" data-id="${esc(item.id)}" type="button">請求書発行</button> ${item.status !== "入金済" ? `<button class="button small secondary" data-action="make-sale" data-id="${esc(item.id)}" type="button">売上化</button>` : ""} ${receiptCreated ? '<span class="badge good">領収書済</span>' : `<button class="button small secondary" data-action="invoice-to-receipt" data-id="${esc(item.id)}" type="button">領収書化</button>`}</td>
+              <td>${rowActions("invoices", item.id)} ${sendActionButtons("invoices", item.id)} <button class="button small secondary" data-action="issue-invoice" data-id="${esc(item.id)}" type="button">請求書発行</button> ${item.status !== "入金済" ? `<button class="button small secondary" data-action="make-sale" data-id="${esc(item.id)}" type="button">売上化</button>` : ""} ${receiptCreated ? '<span class="badge good">領収書済</span>' : `<button class="button small secondary" data-action="invoice-to-receipt" data-id="${esc(item.id)}" type="button">領収書化</button>`}</td>
             </tr>`;
           }).join("")}</tbody>
         </table>
@@ -2009,7 +2296,7 @@
     return `
       <div class="table-wrap"><table>
         <thead><tr><th>番号</th><th>日付</th><th>提出先</th><th>分類</th><th>部門</th><th>内容</th><th class="num">金額</th><th>状態</th><th>納品書番号</th><th>請求書番号</th><th>送付</th><th>操作</th></tr></thead>
-        <tbody>${items.map((item) => `<tr><td>${esc(item.estimateNo)}</td><td>${esc(formatDate(item.date))}</td><td>${esc(item.customer)}</td><td>${esc(item.classification)}</td><td>${esc(item.department || "")}</td><td>${esc(item.content)}</td><td class="num">${yen(item.amount)}</td><td>${statusBadge(item.status)}</td><td>${esc(item.linkedDeliveryNo || "")}</td><td>${esc(item.linkedInvoiceNo || "")}</td><td>${statusBadge(item.sendStatus || "未送付")} ${item.sendDate ? esc(formatDate(item.sendDate)) : ""}</td><td>${rowActions("estimates", item.id)} <button class="button small secondary" data-action="issue-estimate" data-id="${esc(item.id)}" type="button">見積書発行</button>${item.linkedDeliveryNo ? "" : ` <button class="button small secondary" data-action="estimate-to-delivery" data-id="${esc(item.id)}" type="button">納品書化</button>`}${item.linkedInvoiceNo ? "" : ` <button class="button small secondary" data-action="estimate-to-invoice" data-id="${esc(item.id)}" type="button">請求書化</button>`}</td></tr>`).join("")}</tbody>
+        <tbody>${items.map((item) => `<tr><td>${esc(item.estimateNo)}</td><td>${esc(formatDate(item.date))}</td><td>${esc(item.customer)}</td><td>${esc(item.classification)}</td><td>${esc(item.department || "")}</td><td>${esc(item.content)}</td><td class="num">${yen(item.amount)}</td><td>${statusBadge(item.status)}</td><td>${esc(item.linkedDeliveryNo || "")}</td><td>${esc(item.linkedInvoiceNo || "")}</td><td>${statusBadge(item.sendStatus || "未送付")} ${item.sendDate ? esc(formatDate(item.sendDate)) : ""}</td><td>${rowActions("estimates", item.id)} ${sendActionButtons("estimates", item.id)} <button class="button small secondary" data-action="issue-estimate" data-id="${esc(item.id)}" type="button">見積書発行</button>${item.linkedDeliveryNo ? "" : ` <button class="button small secondary" data-action="estimate-to-delivery" data-id="${esc(item.id)}" type="button">納品書化</button>`}${item.linkedInvoiceNo ? "" : ` <button class="button small secondary" data-action="estimate-to-invoice" data-id="${esc(item.id)}" type="button">請求書化</button>`}</td></tr>`).join("")}</tbody>
       </table></div>
     `;
   }
@@ -2023,7 +2310,7 @@
           <td>${esc(item.deliveryNo)}</td><td>${esc(formatDate(item.date))}</td><td>${esc(item.customer || "")}</td><td>${esc(item.subject || "")}</td><td>${esc(item.itemName || "")}</td>
           <td class="num">${esc(item.quantity || "")} ${esc(item.unit || "")}</td><td class="num">${yen(item.amount)}</td><td>${esc(item.linkedEstimateNo || "")}</td><td>${esc(item.linkedInvoiceNo || "")}</td>
           <td>${statusBadge(item.sendStatus || "未送付")} ${item.sendDate ? esc(formatDate(item.sendDate)) : ""}</td>
-          <td>${rowActions("deliveries", item.id)} <button class="button small secondary" data-action="issue-delivery" data-id="${esc(item.id)}" type="button">納品書発行</button>${item.linkedInvoiceNo ? "" : ` <button class="button small secondary" data-action="delivery-to-invoice" data-id="${esc(item.id)}" type="button">請求書化</button>`}</td>
+          <td>${rowActions("deliveries", item.id)} ${sendActionButtons("deliveries", item.id)} <button class="button small secondary" data-action="issue-delivery" data-id="${esc(item.id)}" type="button">納品書発行</button>${item.linkedInvoiceNo ? "" : ` <button class="button small secondary" data-action="delivery-to-invoice" data-id="${esc(item.id)}" type="button">請求書化</button>`}</td>
         </tr>`).join("")}</tbody>
       </table></div>
     `;
@@ -2037,7 +2324,7 @@
         <tbody>${items.map((item) => `<tr>
           <td>${esc(item.receiptNo)}</td><td>${esc(formatDate(item.issueDate))}</td><td>${esc(formatDate(item.paymentDate))}</td><td>${esc(item.customer || "")}</td><td>${esc(item.invoiceNo || "")}</td><td>${esc(item.content || "")}</td><td class="num">${yen(item.amount)}</td>
           <td>${statusBadge(item.sendStatus || "未送付")} ${item.sendDate ? esc(formatDate(item.sendDate)) : ""}</td>
-          <td>${rowActions("receiptDocs", item.id)} <button class="button small secondary" data-action="issue-receipt-doc" data-id="${esc(item.id)}" type="button">領収書発行</button></td>
+          <td>${rowActions("receiptDocs", item.id)} ${sendActionButtons("receiptDocs", item.id)} <button class="button small secondary" data-action="issue-receipt-doc" data-id="${esc(item.id)}" type="button">領収書発行</button></td>
         </tr>`).join("")}</tbody>
       </table></div>
     `;
@@ -2327,6 +2614,14 @@
 
     app.querySelectorAll("[data-action='preview']").forEach((button) => {
       button.addEventListener("click", () => showDetail("expenses", button.dataset.id));
+    });
+
+    app.querySelectorAll("[data-action='send-draft']").forEach((button) => {
+      button.addEventListener("click", () => showSendDraft(button.dataset.collection, button.dataset.id));
+    });
+
+    app.querySelectorAll("[data-action='mark-sent']").forEach((button) => {
+      button.addEventListener("click", () => markDocumentSent(button.dataset.collection, button.dataset.id, button.dataset.method));
     });
 
     app.querySelectorAll("[data-action='issue-invoice']").forEach((button) => {
@@ -2747,6 +3042,7 @@
       bookEntries: fiscalBookEntries(),
       trash: state.trash || [],
       handoffs: fiscalHandoffs(),
+      sendLogs: fiscalSendLogs(),
       audit: state.audit
     };
     addAudit("税理士提出パック出力", { fiscalYear: selectedFiscalYear });
@@ -4282,7 +4578,7 @@
 
   function statusBadge(value) {
     const text = value || "未処理";
-    const cls = ["完了", "入金済", "受注"].includes(text) ? "good" : ["期限超過", "保留", "失注"].includes(text) ? "bad" : "warn";
+    const cls = ["完了", "入金済", "受注", "送付済", "郵送済", "メール", "郵送"].includes(text) ? "good" : ["期限超過", "保留", "失注"].includes(text) ? "bad" : "warn";
     return `<span class="badge ${cls}">${esc(text)}</span>`;
   }
 
@@ -4643,6 +4939,12 @@
       itemCode: "品番",
       title: "ルール名",
       documentType: "帳票",
+      documentLabel: "帳票",
+      documentNo: "帳票番号",
+      documentDate: "帳票日",
+      sentDate: "送付日",
+      method: "送付方法",
+      recipient: "宛先",
       dayOfMonth: "作成日",
       active: "有効",
       lastCreatedMonth: "最終作成月",
