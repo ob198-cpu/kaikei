@@ -275,6 +275,65 @@ h3 {
   min-height: 260px;
 }
 
+.line-editor {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f7f9fc;
+  padding: 12px;
+  overflow-x: auto;
+}
+
+.line-editor-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: baseline;
+  margin-bottom: 10px;
+}
+
+.line-editor-head strong {
+  font-size: 15px;
+}
+
+.line-editor-head span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.line-row {
+  display: grid;
+  grid-template-columns: 42px minmax(180px, 1.6fr) minmax(80px, 0.6fr) minmax(70px, 0.55fr) minmax(110px, 0.8fr) minmax(95px, 0.7fr) minmax(110px, 0.8fr);
+  gap: 8px;
+  align-items: center;
+  min-width: 820px;
+  margin-top: 8px;
+}
+
+.line-row.line-header {
+  margin-top: 0;
+  color: var(--muted);
+  font-weight: 800;
+  font-size: 12px;
+}
+
+.line-row input,
+.line-row select {
+  min-height: 34px;
+  padding: 6px 8px;
+}
+
+.line-row output {
+  text-align: right;
+  color: var(--ink);
+  font-weight: 800;
+}
+
+.line-no {
+  color: var(--muted);
+  font-weight: 800;
+}
+
 .preview-sheet {
   background: #fff;
   border: 1px solid #d7deea;
@@ -335,6 +394,30 @@ h3 {
 .preview-list dd {
   margin: 0;
   overflow-wrap: anywhere;
+}
+
+.preview-lines {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 12px;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  padding: 10px 0;
+}
+
+.preview-lines div {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.preview-lines span {
+  overflow-wrap: anywhere;
+}
+
+.preview-lines strong {
+  white-space: nowrap;
 }
 
 .field {

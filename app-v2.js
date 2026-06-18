@@ -636,6 +636,7 @@
             ${selectField("department", "部門", departments(), departments()[0])}
             ${field("amount", "金額", "number", "")}
             ${selectField("taxRate", "税区分", taxRates, "10%")}
+            ${documentLinesEditor()}
             ${selectField("status", "状態", invoiceStatuses, "未入金")}
             ${selectField("template", "テンプレート", documentTemplates(), "標準")}
             ${selectField("sendStatus", "送付状態", sendStatuses(), "未送付")}
@@ -676,10 +677,11 @@
     `;
 
     document.getElementById("invoiceForm").addEventListener("submit", handleInvoiceSubmit);
+    bindLineEditor("invoiceForm");
     document.getElementById("exportInvoicesCsv").addEventListener("click", () => exportCsv("invoices", invoices, [
       ["invoiceNo", "請求書番号"], ["issueDate", "請求日"], ["serviceDate", "実施日"], ["dueDate", "支払期限"],
       ["expectedPaymentDate", "入金予定日"], ["paymentDate", "入金日"], ["customer", "請求先"], ["content", "内容"],
-      ["classification", "分類"], ["department", "部門"], ["amount", "金額"], ["status", "状態"], ["sendStatus", "送付状態"], ["sendDate", "送付日"], ["template", "テンプレート"], ["note", "確認メモ"]
+      ["classification", "分類"], ["department", "部門"], ["amount", "金額"], ["lines", "明細"], ["status", "状態"], ["sendStatus", "送付状態"], ["sendDate", "送付日"], ["template", "テンプレート"], ["note", "確認メモ"]
     ]));
     bindFilterControls("invoices");
     bindTableActions();
@@ -688,6 +690,7 @@
   function handleInvoiceSubmit(event) {
     event.preventDefault();
     const data = formValues(event.currentTarget);
+    const lines = documentLinesFromData(data, { itemName: data.content, quantity: 1, unit: "式", unitPrice: data.amount, amount: data.amount, taxRate: data.taxRate });
     const record = {
       id: uid("inv"),
       invoiceNo: data.invoiceNo || nextInvoiceNo(),
@@ -700,8 +703,9 @@
       content: data.content,
       classification: data.classification,
       department: data.department || departments()[0],
-      amount: num(data.amount),
+      amount: documentAmountFromLines(lines, data.amount),
       taxRate: data.taxRate || "10%",
+      lines,
       status: data.paymentDate ? "入金済" : data.status || "未入金",
       template: data.template || "標準",
       sendStatus: data.sendStatus || "未送付",
@@ -731,6 +735,7 @@
             ${selectField("department", "部門", departments(), departments()[0])}
             ${textFieldWithList("content", "内容", "", "itemNameList", "品目マスタから選択または直接入力")}
             ${field("amount", "金額", "number", "")}
+            ${documentLinesEditor()}
             ${selectField("status", "状態", ["作成中", "提出済", "受注", "失注", "保留"], "作成中")}
             ${field("linkedDeliveryNo", "納品書番号", "text", "")}
             ${field("linkedInvoiceNo", "請求書番号", "text", "")}
@@ -748,9 +753,10 @@
       </section>
     `;
     document.getElementById("estimateForm").addEventListener("submit", handleEstimateSubmit);
+    bindLineEditor("estimateForm");
     document.getElementById("exportEstimatesCsv").addEventListener("click", () => exportCsv("estimates", estimates, [
       ["estimateNo", "見積番号"], ["date", "見積日"], ["customer", "提出先"], ["classification", "分類"],
-      ["department", "部門"], ["content", "内容"], ["amount", "金額"], ["status", "状態"], ["linkedDeliveryNo", "納品書番号"], ["linkedInvoiceNo", "請求書番号"], ["sendStatus", "送付状態"], ["sendDate", "送付日"], ["template", "テンプレート"], ["note", "メモ"]
+      ["department", "部門"], ["content", "内容"], ["amount", "金額"], ["lines", "明細"], ["status", "状態"], ["linkedDeliveryNo", "納品書番号"], ["linkedInvoiceNo", "請求書番号"], ["sendStatus", "送付状態"], ["sendDate", "送付日"], ["template", "テンプレート"], ["note", "メモ"]
     ]));
     bindTableActions();
   }
@@ -758,6 +764,7 @@
   function handleEstimateSubmit(event) {
     event.preventDefault();
     const data = formValues(event.currentTarget);
+    const lines = documentLinesFromData(data, { itemName: data.content, quantity: 1, unit: "式", unitPrice: data.amount, amount: data.amount, taxRate: data.taxRate || "10%" });
     const record = {
       id: uid("est"),
       estimateNo: data.estimateNo || nextEstimateNo(),
@@ -766,7 +773,8 @@
       classification: data.classification,
       department: data.department || departments()[0],
       content: data.content,
-      amount: num(data.amount),
+      amount: documentAmountFromLines(lines, data.amount),
+      lines,
       status: data.status,
       linkedDeliveryNo: data.linkedDeliveryNo,
       linkedInvoiceNo: data.linkedInvoiceNo,
@@ -801,6 +809,7 @@
             ${field("unitPrice", "単価", "number", "")}
             ${field("amount", "金額", "number", "")}
             ${selectField("taxRate", "税区分", taxRates, "10%")}
+            ${documentLinesEditor()}
             ${selectField("template", "テンプレート", documentTemplates(), "標準")}
             ${selectField("sendStatus", "送付状態", sendStatuses(), "未送付")}
             ${field("sendDate", "送付日", "date", "")}
@@ -821,6 +830,7 @@
       </section>
     `;
     document.getElementById("deliveryForm").addEventListener("submit", handleDeliverySubmit);
+    bindLineEditor("deliveryForm");
     document.getElementById("exportDeliveriesCsv").addEventListener("click", () => exportCsv("deliveries", deliveries, deliveryCsvFields()));
     bindDocumentPreview("deliveryForm", "deliveryPreview", "delivery");
     bindTableActions();
@@ -853,6 +863,7 @@
             ${textFieldWithList("content", "但し書き・内容", "", "itemNameList", "品目マスタから選択または直接入力")}
             ${field("amount", "領収金額", "number", "")}
             ${selectField("taxRate", "税区分", taxRates, "10%")}
+            ${documentLinesEditor()}
             ${selectField("template", "テンプレート", documentTemplates(), "標準")}
             ${selectField("sendStatus", "送付状態", sendStatuses(), "未送付")}
             ${field("sendDate", "送付日", "date", "")}
@@ -871,6 +882,7 @@
       </section>
     `;
     document.getElementById("receiptDocForm").addEventListener("submit", handleReceiptDocSubmit);
+    bindLineEditor("receiptDocForm");
     document.getElementById("exportReceiptDocsCsv").addEventListener("click", () => exportCsv("receipt-docs", receiptDocs, receiptDocCsvFields()));
     bindDocumentPreview("receiptDocForm", "receiptDocPreview", "receipt");
     bindTableActions();
@@ -2438,6 +2450,8 @@
     dialogTitle.textContent = "編集";
     dialogBody.innerHTML = `
       <form id="editRecordForm" class="form-grid">
+        ${partnerDatalist()}
+        ${itemDatalist()}
         ${editFieldsFor(collection, item)}
         <div class="actions" style="grid-column:1 / -1;">
           <button class="button" type="submit">保存</button>
@@ -2446,6 +2460,7 @@
       </form>
     `;
     const form = document.getElementById("editRecordForm");
+    bindLineEditor("editRecordForm");
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
       await updateRecordFromEdit(collection, id, form);
@@ -2504,6 +2519,7 @@
         ${selectField("department", "部門", departments(), item.department || departments()[0])}
         ${field("amount", "金額", "number", item.amount || "")}
         ${selectField("taxRate", "税区分", taxRates, item.taxRate || "10%")}
+        ${documentLinesEditor(normalizedDocumentLines(item))}
         ${selectField("status", "状態", invoiceStatuses, item.status || "未入金")}
         ${selectField("template", "テンプレート", documentTemplates(), item.template || "標準")}
         ${selectField("sendStatus", "送付状態", sendStatuses(), item.sendStatus || "未送付")}
@@ -2523,6 +2539,7 @@
         ${selectField("department", "部門", departments(), item.department || departments()[0])}
         ${field("content", "内容", "text", item.content || "")}
         ${field("amount", "金額", "number", item.amount || "")}
+        ${documentLinesEditor(normalizedDocumentLines(item))}
         ${selectField("status", "状態", ["作成中", "提出済", "受注", "失注", "保留"], item.status || "作成中")}
         ${field("linkedDeliveryNo", "納品書番号", "text", item.linkedDeliveryNo || "")}
         ${field("linkedInvoiceNo", "請求書番号", "text", item.linkedInvoiceNo || "")}
@@ -2544,6 +2561,7 @@
         ${field("unitPrice", "単価", "number", item.unitPrice || "")}
         ${field("amount", "金額", "number", item.amount || "")}
         ${selectField("taxRate", "税区分", taxRates, item.taxRate || "10%")}
+        ${documentLinesEditor(normalizedDocumentLines(item))}
         ${selectField("template", "テンプレート", documentTemplates(), item.template || "標準")}
         ${selectField("sendStatus", "送付状態", sendStatuses(), item.sendStatus || "未送付")}
         ${field("sendDate", "送付日", "date", item.sendDate || "")}
@@ -2562,6 +2580,7 @@
         ${field("content", "但し書き・内容", "text", item.content || "")}
         ${field("amount", "領収金額", "number", item.amount || "")}
         ${selectField("taxRate", "税区分", taxRates, item.taxRate || "10%")}
+        ${documentLinesEditor(normalizedDocumentLines(item))}
         ${selectField("template", "テンプレート", documentTemplates(), item.template || "標準")}
         ${selectField("sendStatus", "送付状態", sendStatuses(), item.sendStatus || "未送付")}
         ${field("sendDate", "送付日", "date", item.sendDate || "")}
@@ -2654,6 +2673,7 @@
 
     Object.entries(data).forEach(([key, value]) => {
       if (key === "proof" || key === "invoiceEligible") return;
+      if (/^line(ItemName|Quantity|Unit|UnitPrice|TaxRate)\d+$/.test(key)) return;
       item[key] = numericFields.includes(key) ? num(value) : clean(value);
     });
 
@@ -2670,6 +2690,17 @@
     if (collection === "payroll" && !num(item.netPay)) item.netPay = num(item.basePay) + num(item.allowance) - num(item.deduction);
     if (collection === "sales") markInvoicePaidFromSale(item);
     if (collection === "invoices" && item.paymentDate) item.status = "入金済";
+    if (["estimates", "invoices", "deliveries", "receiptDocs"].includes(collection)) {
+      item.lines = documentLinesFromData(data, {
+        itemName: item.content || item.itemName || item.subject,
+        quantity: item.quantity || 1,
+        unit: item.unit || "式",
+        unitPrice: item.unitPrice || item.amount,
+        amount: item.amount,
+        taxRate: item.taxRate || "10%"
+      });
+      item.amount = documentAmountFromLines(item.lines, item.amount);
+    }
     if (collection === "deliveries" && !num(item.amount)) item.amount = Math.round((num(item.quantity) || 1) * num(item.unitPrice));
     if (collection === "recurringDocs") {
       item.active = Boolean(formData.get("active"));
@@ -2972,6 +3003,7 @@
     }
     const now = new Date().toISOString();
     const deliveryNo = nextDeliveryNo();
+    const lines = cloneDocumentLines(estimate);
     const delivery = deliveryRecordFromData({
       deliveryNo,
       date: TODAY,
@@ -2983,6 +3015,7 @@
       unitPrice: estimate.amount,
       amount: estimate.amount,
       taxRate: "10%",
+      lines,
       template: estimate.template || "標準",
       sendStatus: "未送付",
       linkedEstimateNo: estimate.estimateNo,
@@ -3011,6 +3044,7 @@
     }
     const now = new Date().toISOString();
     const invoiceNo = nextInvoiceNo();
+    const lines = cloneDocumentLines(estimate);
     const invoice = {
       id: uid("inv"),
       invoiceNo,
@@ -3023,8 +3057,9 @@
       content: estimate.content,
       classification: estimate.classification,
       department: estimate.department || departments()[0],
-      amount: num(estimate.amount),
+      amount: documentAmountFromLines(lines, estimate.amount),
       taxRate: "10%",
+      lines,
       status: "未入金",
       template: estimate.template || "標準",
       sendStatus: "未送付",
@@ -3055,6 +3090,7 @@
     }
     const now = new Date().toISOString();
     const invoiceNo = nextInvoiceNo();
+    const lines = cloneDocumentLines(delivery);
     const invoice = {
       id: uid("inv"),
       invoiceNo,
@@ -3067,8 +3103,9 @@
       content: delivery.subject || delivery.itemName,
       classification: "業務委託",
       department: departments()[0],
-      amount: num(delivery.amount),
+      amount: documentAmountFromLines(lines, delivery.amount),
       taxRate: delivery.taxRate || "10%",
+      lines,
       status: "未入金",
       template: delivery.template || "標準",
       sendStatus: "未送付",
@@ -3099,6 +3136,7 @@
     }
     const now = new Date().toISOString();
     const receiptNo = nextReceiptNo();
+    const lines = cloneDocumentLines(invoice);
     const receiptDoc = receiptDocRecordFromData({
       receiptNo,
       issueDate: TODAY,
@@ -3107,6 +3145,7 @@
       invoiceNo: invoice.invoiceNo,
       content: invoice.content || "お品代",
       amount: invoice.amount,
+      lines,
       taxRate: invoice.taxRate || "10%",
       template: invoice.template || "標準",
       sendStatus: "未送付",
@@ -3138,6 +3177,7 @@
     h1{font-size:32px;margin:0;letter-spacing:0}.number{font-size:14px;color:#637087;margin-top:8px}
     .company{text-align:right}.company strong{font-size:18px}.muted{color:#637087}.partner{font-size:20px;margin:26px 0 18px}
     table{width:100%;border-collapse:collapse;margin-top:18px}th,td{border:1px solid #d8dee8;padding:10px 12px;text-align:left;vertical-align:top}th{width:210px;background:#e8f1fb}
+    .lines th{width:auto}.lines td.num,.lines th.num{text-align:right;white-space:nowrap}.totals{max-width:420px;margin-left:auto}.totals th{width:auto}
     .amount{margin:28px 0;padding:18px 22px;background:#eef5ff;border-left:5px solid ${accent};display:flex;justify-content:space-between;align-items:baseline}
     .amount span{font-size:15px}.amount strong{font-size:30px}.note{margin-top:22px;padding:14px;background:#fff8e6;border:1px solid #ead8a6}
     .actions{margin-top:22px}.button{border:1px solid ${accent};background:${accent};color:#fff;border-radius:4px;padding:9px 16px;cursor:pointer}
@@ -3157,7 +3197,8 @@
       </div>
     </div>
     <div class="partner">${esc(meta.partner || meta.partnerLabel)}</div>
-    <div class="amount"><span>${esc(meta.amountLabel)}</span><strong>${esc(yen(record.amount))}</strong></div>
+    <div class="amount"><span>${esc(meta.amountLabel)}</span><strong>${esc(yen(meta.financial.total))}</strong></div>
+    ${documentLinesTable(meta.lines, meta.financial)}
     <table><tbody>${meta.rows.map(([label, value]) => `<tr><th>${esc(label)}</th><td>${esc(value || "")}</td></tr>`).join("")}</tbody></table>
     <div class="note">
       ${esc(meta.note)}
@@ -3173,7 +3214,9 @@
     const number = documentNumber(type, record);
     const partnerLabel = type === "estimate" ? "提出先" : "取引先";
     const partner = partnerDisplay(record.customer);
-    const rows = documentRows(type, record);
+    const lines = normalizedDocumentLines(record);
+    const financial = documentFinancials(lines, record.amount);
+    const rows = documentRows(type, record, lines, financial);
     const notes = {
       estimate: "見積書は記録として保存し、受注後は納品書化または請求書化できます。金額や条件に変更がある場合は変換前に編集してください。",
       delivery: "納品書は見積・請求書とのつながりを残します。請求書化後も納品日と内容を確認できるよう保存してください。",
@@ -3186,12 +3229,16 @@
       partnerLabel,
       partner: partner || `${partnerLabel} 御中`,
       amountLabel: type === "receipt" ? "領収金額" : `${title}金額`,
+      lines,
+      financial,
       rows,
       note: notes[type] || "帳票として保存します。"
     };
   }
 
-  function documentRows(type, record) {
+  function documentRows(type, record, lines = normalizedDocumentLines(record), financial = documentFinancials(lines, record.amount)) {
+    const lineSummary = documentLinesSummary(lines);
+    const taxSummary = taxBreakdownText(financial.taxBreakdown);
     if (type === "invoice") {
       return [
         ["請求書番号", record.invoiceNo],
@@ -3202,9 +3249,11 @@
         ["入金日", formatDate(record.paymentDate)],
         ["請求先", record.customer],
         ["内容", record.content],
+        ["明細", lineSummary],
         ["分類", record.classification],
         ["部門", record.department],
         ["税区分", record.taxRate || "未設定"],
+        ["税率別内訳", taxSummary],
         ["状態", record.status],
         ["送付状態", record.sendStatus],
         ["送付日", formatDate(record.sendDate)],
@@ -3221,10 +3270,9 @@
         ["納品日", formatDate(record.date)],
         ["取引先", record.customer],
         ["件名", record.subject],
-        ["品目", record.itemName],
-        ["数量", [record.quantity, record.unit].filter(Boolean).join(" ")],
-        ["単価", yen(record.unitPrice)],
+        ["明細", lineSummary],
         ["税区分", record.taxRate],
+        ["税率別内訳", taxSummary],
         ["送付状態", record.sendStatus],
         ["送付日", formatDate(record.sendDate)],
         ["関連見積番号", record.linkedEstimateNo],
@@ -3240,7 +3288,9 @@
         ["取引先", record.customer],
         ["請求書番号", record.invoiceNo],
         ["但し書き・内容", record.content],
+        ["明細", lineSummary],
         ["税区分", record.taxRate],
+        ["税率別内訳", taxSummary],
         ["送付状態", record.sendStatus],
         ["送付日", formatDate(record.sendDate)],
         ["備考", record.note]
@@ -3251,8 +3301,10 @@
       ["見積日", formatDate(record.date)],
       ["提出先", record.customer],
       ["内容", record.content],
+      ["明細", lineSummary],
       ["分類", record.classification],
       ["部門", record.department],
+      ["税率別内訳", taxSummary],
       ["状態", record.status],
       ["送付状態", record.sendStatus],
       ["送付日", formatDate(record.sendDate)],
@@ -3271,7 +3323,8 @@
           <span>${esc(meta.number || "")}</span>
         </div>
         <div class="preview-partner">${esc(meta.partner || meta.partnerLabel)}</div>
-        <div class="preview-amount"><span>${esc(meta.amountLabel)}</span><strong>${esc(yen(record.amount))}</strong></div>
+        <div class="preview-amount"><span>${esc(meta.amountLabel)}</span><strong>${esc(yen(meta.financial.total))}</strong></div>
+        ${documentLinesPreview(meta.lines)}
         <dl class="preview-list">
           ${meta.rows.slice(0, 8).map(([label, value]) => `<dt>${esc(label)}</dt><dd>${esc(value || "")}</dd>`).join("")}
         </dl>
@@ -3293,11 +3346,202 @@
     update();
   }
 
+  function documentLinesEditor(lines = []) {
+    const rows = Array.from({ length: Math.max(3, lines.length + 1) }, (_, index) => {
+      const line = lines[index] || {};
+      const initialAmount = line.itemName || line.amount ? yen(lineLineAmount(line)) : "";
+      return `
+        <div class="line-row">
+          <span class="line-no">${index + 1}</span>
+          <input name="lineItemName${index}" type="text" list="itemNameList" value="${esc(line.itemName || "")}" placeholder="品目">
+          <input name="lineQuantity${index}" type="number" value="${esc(line.quantity || "")}" placeholder="数量">
+          <input name="lineUnit${index}" type="text" value="${esc(line.unit || "")}" placeholder="単位">
+          <input name="lineUnitPrice${index}" type="number" value="${esc(line.unitPrice || "")}" placeholder="単価">
+          <select name="lineTaxRate${index}">${taxRates.map((rate) => `<option value="${esc(rate)}" ${String(rate) === String(line.taxRate || "10%") ? "selected" : ""}>${esc(rate)}</option>`).join("")}</select>
+          <output>${esc(initialAmount)}</output>
+        </div>
+      `;
+    }).join("");
+    return `
+      <section class="line-editor" data-line-editor style="grid-column:1 / -1;">
+        <div class="line-editor-head">
+          <strong>明細</strong>
+          <span>品目マスタ名を入れると単価・単位・税率を補完します</span>
+        </div>
+        <div class="line-row line-header">
+          <span>No.</span><span>品目</span><span>数量</span><span>単位</span><span>単価</span><span>税率</span><span>金額</span>
+        </div>
+        ${rows}
+      </section>
+    `;
+  }
+
+  function bindLineEditor(formId) {
+    const form = document.getElementById(formId);
+    if (!form) return;
+    const update = (event) => {
+      if (event && /^lineItemName\d+$/.test(event.target.name || "")) {
+        const index = event.target.name.replace("lineItemName", "");
+        const master = itemByName(event.target.value);
+        if (master) {
+          const unitPrice = form.querySelector(`[name="lineUnitPrice${index}"]`);
+          const unit = form.querySelector(`[name="lineUnit${index}"]`);
+          const taxRate = form.querySelector(`[name="lineTaxRate${index}"]`);
+          if (unitPrice && !unitPrice.value) unitPrice.value = master.unitPrice || "";
+          if (unit && !unit.value) unit.value = master.unit || "式";
+          if (taxRate) taxRate.value = master.taxRate || "10%";
+        }
+      }
+      const lines = documentLinesFromData(formValues(form));
+      form.querySelectorAll(".line-row:not(.line-header)").forEach((row, index) => {
+        const line = lineFromData(formValues(form), index);
+        const output = row.querySelector("output");
+        if (output) output.textContent = line.itemName ? yen(lineLineAmount(line)) : "";
+      });
+      const amount = form.querySelector("[name='amount']");
+      if (amount && lines.length) amount.value = String(documentAmountFromLines(lines, amount.value));
+      const content = form.querySelector("[name='content']");
+      if (content && !content.value && lines.length) content.value = documentLinesSummary(lines);
+      const subject = form.querySelector("[name='subject']");
+      if (subject && !subject.value && lines.length) subject.value = documentLinesSummary(lines);
+    };
+    form.addEventListener("input", update);
+    form.addEventListener("change", update);
+    update();
+  }
+
+  function documentLinesFromData(data, fallback) {
+    const lines = [];
+    for (let index = 0; index < 12; index += 1) {
+      const line = lineFromData(data, index);
+      if (line.itemName || line.quantity || line.unitPrice || line.amount) lines.push(line);
+    }
+    if (!lines.length && fallback) {
+      const fallbackLine = normalizeLine(fallback);
+      if (fallbackLine.itemName || fallbackLine.amount) lines.push(fallbackLine);
+    }
+    return lines;
+  }
+
+  function lineFromData(data, index) {
+    const itemName = clean(data[`lineItemName${index}`]);
+    const master = itemByName(itemName);
+    const quantity = num(data[`lineQuantity${index}`]) || (itemName ? 1 : 0);
+    const unitPrice = num(data[`lineUnitPrice${index}`]) || num(master && master.unitPrice);
+    const amount = quantity && unitPrice ? Math.round(quantity * unitPrice) : 0;
+    return normalizeLine({
+      itemName,
+      quantity,
+      unit: data[`lineUnit${index}`] || (master && master.unit) || "式",
+      unitPrice,
+      amount,
+      taxRate: data[`lineTaxRate${index}`] || (master && master.taxRate) || "10%"
+    });
+  }
+
+  function normalizeLine(line) {
+    const quantity = num(line && line.quantity) || (line && (line.itemName || line.amount) ? 1 : 0);
+    const unitPrice = num(line && line.unitPrice) || num(line && line.amount);
+    const amount = num(line && line.amount) || Math.round(quantity * unitPrice);
+    return {
+      itemName: clean(line && line.itemName),
+      quantity,
+      unit: clean(line && line.unit) || "式",
+      unitPrice,
+      amount,
+      taxRate: clean(line && line.taxRate) || "10%"
+    };
+  }
+
+  function normalizedDocumentLines(record) {
+    const direct = cloneDocumentLines(record);
+    if (direct.length) return direct;
+    return documentLinesFromData({}, {
+      itemName: record.content || record.itemName || record.subject,
+      quantity: record.quantity || 1,
+      unit: record.unit || "式",
+      unitPrice: record.unitPrice || record.amount,
+      amount: record.amount,
+      taxRate: record.taxRate || "10%"
+    });
+  }
+
+  function cloneDocumentLines(record) {
+    return Array.isArray(record && record.lines) ? record.lines.map(normalizeLine).filter((line) => line.itemName || line.amount) : [];
+  }
+
+  function documentAmountFromLines(lines, fallback) {
+    const total = (lines || []).reduce((acc, line) => acc + lineLineAmount(line), 0);
+    return total || num(fallback);
+  }
+
+  function lineLineAmount(line) {
+    return num(line && line.amount) || Math.round((num(line && line.quantity) || 0) * num(line && line.unitPrice));
+  }
+
+  function taxRateNumber(rate) {
+    const match = String(rate || "").match(/(\d+(?:\.\d+)?)/);
+    return match ? Number(match[1]) : 0;
+  }
+
+  function includedTax(amount, rate) {
+    const percent = taxRateNumber(rate);
+    return percent ? Math.round(num(amount) * percent / (100 + percent)) : 0;
+  }
+
+  function documentFinancials(lines, fallbackAmount) {
+    const normalized = lines && lines.length ? lines : [{ amount: num(fallbackAmount), taxRate: "10%" }];
+    const total = documentAmountFromLines(normalized, fallbackAmount);
+    const taxBreakdown = normalized.reduce((acc, line) => {
+      const rate = line.taxRate || "不明";
+      const amount = lineLineAmount(line);
+      acc[rate] = acc[rate] || { rate, amount: 0, tax: 0 };
+      acc[rate].amount += amount;
+      acc[rate].tax += includedTax(amount, rate);
+      return acc;
+    }, {});
+    const tax = Object.values(taxBreakdown).reduce((acc, row) => acc + row.tax, 0);
+    return { total, tax, subtotal: total - tax, taxBreakdown: Object.values(taxBreakdown) };
+  }
+
+  function documentLinesSummary(lines) {
+    return (lines || []).map((line) => clean(line.itemName)).filter(Boolean).join("、");
+  }
+
+  function taxBreakdownText(rows) {
+    return (rows || []).map((row) => `${row.rate}: ${yen(row.amount)}（内税 ${yen(row.tax)}）`).join(" / ");
+  }
+
+  function documentLinesTable(lines, financial) {
+    if (!lines.length) return "";
+    return `
+      <table class="lines">
+        <thead><tr><th>品目</th><th class="num">数量</th><th>単位</th><th class="num">単価</th><th>税率</th><th class="num">金額</th></tr></thead>
+        <tbody>${lines.map((line) => `<tr><td>${esc(line.itemName || "")}</td><td class="num">${esc(line.quantity || "")}</td><td>${esc(line.unit || "")}</td><td class="num">${esc(yen(line.unitPrice))}</td><td>${esc(line.taxRate || "")}</td><td class="num">${esc(yen(lineLineAmount(line)))}</td></tr>`).join("")}</tbody>
+      </table>
+      <table class="totals"><tbody>
+        <tr><th>小計</th><td class="num">${esc(yen(financial.subtotal))}</td></tr>
+        <tr><th>消費税内訳</th><td class="num">${esc(yen(financial.tax))}</td></tr>
+        <tr><th>合計</th><td class="num">${esc(yen(financial.total))}</td></tr>
+      </tbody></table>
+    `;
+  }
+
+  function documentLinesPreview(lines) {
+    if (!lines.length) return "";
+    return `
+      <div class="preview-lines">
+        ${lines.slice(0, 4).map((line) => `<div><span>${esc(line.itemName || "")}</span><strong>${esc(yen(lineLineAmount(line)))}</strong></div>`).join("")}
+      </div>
+    `;
+  }
+
   function deliveryRecordFromData(data, withId = true) {
     const master = itemByName(data.itemName || data.subject || data.content);
+    const lines = cloneDocumentLines(data).length ? cloneDocumentLines(data) : documentLinesFromData(data, { itemName: data.itemName || data.content || data.subject, quantity: data.quantity, unit: data.unit, unitPrice: data.unitPrice || data.amount, amount: data.amount, taxRate: data.taxRate });
     const quantity = num(data.quantity) || 1;
     const unitPrice = num(data.unitPrice) || num(master && master.unitPrice);
-    const amount = num(data.amount) || Math.round(quantity * unitPrice);
+    const amount = documentAmountFromLines(lines, num(data.amount) || Math.round(quantity * unitPrice));
     return {
       ...(withId ? { id: uid("del") } : {}),
       deliveryNo: data.deliveryNo || nextDeliveryNo(),
@@ -3310,6 +3554,7 @@
       unitPrice,
       amount,
       taxRate: data.taxRate || (master && master.taxRate) || "10%",
+      lines,
       template: data.template || "標準",
       sendStatus: data.sendStatus || "未送付",
       sendDate: data.sendDate,
@@ -3321,6 +3566,7 @@
   }
 
   function receiptDocRecordFromData(data, withId = true) {
+    const lines = cloneDocumentLines(data).length ? cloneDocumentLines(data) : documentLinesFromData(data, { itemName: data.content, quantity: 1, unit: "式", unitPrice: data.amount, amount: data.amount, taxRate: data.taxRate });
     return {
       ...(withId ? { id: uid("receiptDoc") } : {}),
       receiptNo: data.receiptNo || nextReceiptNo(),
@@ -3329,8 +3575,9 @@
       customer: data.customer,
       invoiceNo: data.invoiceNo,
       content: data.content || "お品代",
-      amount: num(data.amount),
+      amount: documentAmountFromLines(lines, data.amount),
       taxRate: data.taxRate || "10%",
+      lines,
       template: data.template || "標準",
       sendStatus: data.sendStatus || "未送付",
       sendDate: data.sendDate,
@@ -3350,6 +3597,14 @@
       return;
     }
     const scheduledDate = dateInMonth(month, template.dayOfMonth || 15);
+    const recurringLines = [normalizeLine({
+      itemName: template.content,
+      quantity: 1,
+      unit: "式",
+      unitPrice: template.amount,
+      amount: template.amount,
+      taxRate: template.taxRate || "10%"
+    })];
     if (template.documentType === "delivery") {
       const delivery = deliveryRecordFromData({
         deliveryNo: nextDeliveryNo(),
@@ -3362,6 +3617,7 @@
         unitPrice: template.amount,
         amount: template.amount,
         taxRate: template.taxRate,
+        lines: recurringLines,
         template: template.template,
         sendStatus: "未送付",
         note: [`毎月自動: ${template.title || ""}`, template.note].filter(Boolean).join(" / ")
@@ -3377,6 +3633,7 @@
         invoiceNo: "",
         content: template.content,
         amount: template.amount,
+        lines: recurringLines,
         taxRate: template.taxRate,
         template: template.template,
         sendStatus: "未送付",
@@ -3397,8 +3654,9 @@
         content: template.content,
         classification: template.classification || "業務委託",
         department: template.department || departments()[0],
-        amount: num(template.amount),
+        amount: documentAmountFromLines(recurringLines, template.amount),
         taxRate: template.taxRate || "10%",
+        lines: recurringLines,
         status: "未入金",
         template: template.template || "標準",
         sendStatus: "未送付",
@@ -4222,11 +4480,11 @@
   }
 
   function deliveryCsvFields() {
-    return [["deliveryNo", "納品書番号"], ["date", "納品日"], ["customer", "取引先"], ["subject", "件名"], ["itemName", "品目"], ["quantity", "数量"], ["unit", "単位"], ["unitPrice", "単価"], ["amount", "金額"], ["taxRate", "税区分"], ["linkedEstimateNo", "関連見積番号"], ["linkedInvoiceNo", "関連請求書番号"], ["sendStatus", "送付状態"], ["sendDate", "送付日"], ["template", "テンプレート"], ["note", "備考"]];
+    return [["deliveryNo", "納品書番号"], ["date", "納品日"], ["customer", "取引先"], ["subject", "件名"], ["itemName", "品目"], ["quantity", "数量"], ["unit", "単位"], ["unitPrice", "単価"], ["amount", "金額"], ["lines", "明細"], ["taxRate", "税区分"], ["linkedEstimateNo", "関連見積番号"], ["linkedInvoiceNo", "関連請求書番号"], ["sendStatus", "送付状態"], ["sendDate", "送付日"], ["template", "テンプレート"], ["note", "備考"]];
   }
 
   function receiptDocCsvFields() {
-    return [["receiptNo", "領収書番号"], ["issueDate", "発行日"], ["paymentDate", "入金日"], ["customer", "取引先"], ["invoiceNo", "請求書番号"], ["content", "内容"], ["amount", "金額"], ["taxRate", "税区分"], ["sendStatus", "送付状態"], ["sendDate", "送付日"], ["template", "テンプレート"], ["note", "備考"]];
+    return [["receiptNo", "領収書番号"], ["issueDate", "発行日"], ["paymentDate", "入金日"], ["customer", "取引先"], ["invoiceNo", "請求書番号"], ["content", "内容"], ["amount", "金額"], ["lines", "明細"], ["taxRate", "税区分"], ["sendStatus", "送付状態"], ["sendDate", "送付日"], ["template", "テンプレート"], ["note", "備考"]];
   }
 
   function recurringCsvFields() {
@@ -4328,6 +4586,7 @@
 
   function displayValue(key, value) {
     if (value === null || value === undefined) return "";
+    if (Array.isArray(value)) return key === "lines" ? documentLinesSummary(value) : JSON.stringify(value);
     if (key.toLowerCase().includes("date") || key === "createdAt" || key === "at") return String(value).includes("T") ? formatDateTime(value) : formatDate(value);
     if (["amount", "unitPrice", "fuelClaim", "lodging", "total", "basePay", "allowance", "deduction", "netPay", "debit", "credit", "balance", "previous", "current", "diff"].includes(key)) return yen(value);
     if (key === "paymentMethod") return paymentLabel(value);
@@ -4372,6 +4631,7 @@
       linkedDeliveryNo: "関連納品書番号",
       linkedInvoiceNo: "関連請求書番号",
       linkedReceiptNo: "関連領収書番号",
+      lines: "明細",
       name: "取引先名",
       honorific: "敬称",
       contact: "担当者",
