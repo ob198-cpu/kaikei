@@ -1096,6 +1096,7 @@
         </div>
       </section>
     `;
+    bindTableActions();
   }
 
   function renderSendManagement() {
@@ -2409,7 +2410,7 @@
     if (!rows.length) return `<div class="empty">販売管理の対象データはまだありません。</div>`;
     return `
       <div class="table-wrap"><table>
-        <thead><tr><th>基準日</th><th>取引先</th><th>内容</th><th>見積</th><th>納品</th><th>請求</th><th>入金</th><th>領収</th><th class="num">金額</th><th>確認</th></tr></thead>
+        <thead><tr><th>基準日</th><th>取引先</th><th>内容</th><th>見積</th><th>納品</th><th>請求</th><th>入金</th><th>領収</th><th class="num">金額</th><th>確認</th><th>次アクション</th></tr></thead>
         <tbody>${rows.map((row) => `<tr>
           <td>${esc(formatDate(row.date))}</td><td>${esc(row.customer || "")}</td><td>${esc(row.content || "")}</td>
           <td>${row.estimate ? `${statusBadge(row.estimate.status || "作成中")}<br>${esc(row.estimate.estimateNo || "")}` : '<span class="badge warn">なし</span>'}</td>
@@ -2417,10 +2418,29 @@
           <td>${row.invoice ? `${statusBadge(row.invoice.status || "未入金")}<br>${esc(row.invoice.invoiceNo || "")}` : '<span class="badge warn">なし</span>'}</td>
           <td>${row.sale ? `${statusBadge("入金済")}<br>${esc(formatDate(row.sale.date))}` : '<span class="badge warn">未入金</span>'}</td>
           <td>${row.receipt ? `${statusBadge(row.receipt.sendStatus || "未送付")}<br>${esc(row.receipt.receiptNo || "")}` : '<span class="badge warn">未発行</span>'}</td>
-          <td class="num">${yen(row.amount)}</td><td>${salesFlowIssueBadges(row)}</td>
+          <td class="num">${yen(row.amount)}</td><td>${salesFlowIssueBadges(row)}</td><td>${salesFlowActionButtons(row)}</td>
         </tr>`).join("")}</tbody>
       </table></div>
     `;
+  }
+
+  function salesFlowActionButtons(row) {
+    const actions = [];
+    if (row.estimate && !row.delivery) {
+      actions.push(`<button class="button small secondary" data-action="estimate-to-delivery" data-id="${esc(row.estimate.id)}" type="button">納品書化</button>`);
+    }
+    if (row.delivery && !row.invoice) {
+      actions.push(`<button class="button small secondary" data-action="delivery-to-invoice" data-id="${esc(row.delivery.id)}" type="button">請求書化</button>`);
+    } else if (row.estimate && !row.invoice) {
+      actions.push(`<button class="button small secondary" data-action="estimate-to-invoice" data-id="${esc(row.estimate.id)}" type="button">請求書化</button>`);
+    }
+    if (row.invoice && !row.sale) {
+      actions.push(`<button class="button small secondary" data-action="make-sale" data-id="${esc(row.invoice.id)}" type="button">売上化</button>`);
+    }
+    if (row.invoice && row.sale && !row.receipt) {
+      actions.push(`<button class="button small secondary" data-action="invoice-to-receipt" data-id="${esc(row.invoice.id)}" type="button">領収書化</button>`);
+    }
+    return actions.length ? `<div class="actions">${actions.join("")}</div>` : '<span class="badge good">完了</span>';
   }
 
   function renderLedgerTable(type, items) {
@@ -2728,31 +2748,7 @@
     app.querySelectorAll("[data-action='make-sale']").forEach((button) => {
       button.addEventListener("click", () => {
         const invoice = state.invoices.find((item) => item.id === button.dataset.id);
-        if (!invoice) return;
-        const paymentDate = invoice.paymentDate || invoice.expectedPaymentDate || TODAY;
-        if (isMonthLocked(paymentDate.slice(0, 7))) {
-          alert("入金月が月末締め完了済みのため、売上化できません。締め状態を確認してください。");
-          return;
-        }
-        const sale = {
-          id: uid("sale"),
-          date: paymentDate,
-          customer: invoice.customer,
-          content: invoice.content,
-          classification: invoice.classification,
-          department: invoice.department || departments()[0],
-          amount: invoice.amount,
-          invoiceNo: invoice.invoiceNo,
-          bankAccount: state.settings.bankAccount || "道銀",
-          note: "請求書から売上登録",
-          createdAt: new Date().toISOString()
-        };
-        state.sales.push(sale);
-        invoice.status = "入金済";
-        invoice.paymentDate = paymentDate;
-        addAudit("請求書売上化", sale);
-        persist("売上化");
-        renderInvoices();
+        if (invoice) createSaleFromInvoice(invoice);
       });
     });
   }
@@ -3333,6 +3329,41 @@
     downloadBlob(`領収書-${safeFilePart(receiptDoc.receiptNo || receiptDoc.id)}-${TODAY}.html`, new Blob([html], { type: "text/html;charset=utf-8" }));
   }
 
+  function renderAfterDocumentConversion(fallbackRender) {
+    if (activeView === "salesFlow") {
+      renderSalesFlow();
+    } else {
+      fallbackRender();
+    }
+  }
+
+  function createSaleFromInvoice(invoice) {
+    const paymentDate = invoice.paymentDate || invoice.expectedPaymentDate || TODAY;
+    if (isMonthLocked(paymentDate.slice(0, 7))) {
+      alert("入金月が月末締め完了済みのため、売上化できません。締め状態を確認してください。");
+      return;
+    }
+    const sale = {
+      id: uid("sale"),
+      date: paymentDate,
+      customer: invoice.customer,
+      content: invoice.content,
+      classification: invoice.classification,
+      department: invoice.department || departments()[0],
+      amount: invoice.amount,
+      invoiceNo: invoice.invoiceNo,
+      bankAccount: state.settings.bankAccount || "道銀",
+      note: "請求書から売上登録",
+      createdAt: new Date().toISOString()
+    };
+    state.sales.push(sale);
+    invoice.status = "入金済";
+    invoice.paymentDate = paymentDate;
+    addAudit("請求書売上化", sale);
+    persist("売上化");
+    renderAfterDocumentConversion(renderInvoices);
+  }
+
   function createDeliveryFromEstimate(estimate) {
     if (estimate.linkedDeliveryNo) {
       alert("この見積にはすでに納品書番号が紐づいています。");
@@ -3371,7 +3402,7 @@
     addAudit("見積から納品書化", { estimateNo: estimate.estimateNo, deliveryNo });
     persist("納品書化");
     alert(`納品書 ${deliveryNo} を作成しました。`);
-    renderEstimates();
+    renderAfterDocumentConversion(renderEstimates);
   }
 
   function createInvoiceFromEstimate(estimate) {
@@ -3417,7 +3448,7 @@
     addAudit("見積から請求書化", { estimateNo: estimate.estimateNo, invoiceNo });
     persist("請求書化");
     alert(`請求書 ${invoiceNo} を作成しました。`);
-    renderEstimates();
+    renderAfterDocumentConversion(renderEstimates);
   }
 
   function createInvoiceFromDelivery(delivery) {
@@ -3467,7 +3498,7 @@
     addAudit("納品書から請求書化", { deliveryNo: delivery.deliveryNo, invoiceNo });
     persist("請求書化");
     alert(`請求書 ${invoiceNo} を作成しました。`);
-    renderDeliveries();
+    renderAfterDocumentConversion(renderDeliveries);
   }
 
   function createReceiptFromInvoice(invoice) {
@@ -3499,7 +3530,7 @@
     addAudit("請求書から領収書化", { invoiceNo: invoice.invoiceNo, receiptNo });
     persist("領収書化");
     alert(`領収書 ${receiptNo} を作成しました。`);
-    renderInvoices();
+    renderAfterDocumentConversion(renderInvoices);
   }
 
   function businessDocumentHtml(type, record) {
