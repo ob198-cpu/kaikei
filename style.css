@@ -761,6 +761,15 @@ tr:last-child td {
   object-fit: cover;
 }
 
+.receipt-thumb.mini {
+  width: 64px;
+  height: 46px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
 .receipt-card-body {
   padding: 12px;
   display: grid;

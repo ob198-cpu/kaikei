@@ -36,6 +36,8 @@
   const taxRates = ["10%", "8%", "非課税", "不明"];
   const invoiceStatuses = ["未入金", "入金予定", "入金済", "保留"];
   const paymentRequestStatuses = ["下書き", "申請中", "差し戻し", "承認済", "支払済"];
+  const receivedDocTypes = ["請求書", "領収書", "納品書", "見積書", "契約書", "その他"];
+  const receivedDocStatuses = ["未確認", "保管", "支払依頼待ち", "申請中", "承認済", "支払済"];
   const ledgerStatuses = ["未処理", "確認中", "完了", "保留"];
   const paymentMethods = [
     ["card", "カード"],
@@ -48,6 +50,7 @@
   const pageMeta = {
     dashboard: ["ホーム", "月次の未処理、保存状態、提出前チェック"],
     receipts: ["レシート管理", "月ごとに証憑画像を保存し、カードと現金を分けて確認"],
+    receivedDocs: ["受領書類", "請求書、領収書、納品書など受け取った書類を保管"],
     expenses: ["経費表", "税理士の分類に合わせて品名、個数、単価、経費を管理"],
     approvals: ["申請・承認", "支払依頼、事前申請、承認、差し戻し、支払済みを管理"],
     sales: ["売上", "振込入金を売上として通帳別に管理"],
@@ -139,6 +142,7 @@
         lastBackupAt: ""
       },
       expenses: [],
+      receivedDocs: [],
       paymentRequests: [],
       sales: [],
       invoices: [],
@@ -186,6 +190,7 @@
 
     [
       "expenses",
+      "receivedDocs",
       "paymentRequests",
       "sales",
       "invoices",
@@ -272,6 +277,7 @@
     const renderers = {
       dashboard: renderDashboard,
       receipts: renderReceipts,
+      receivedDocs: renderReceivedDocs,
       expenses: renderExpenses,
       approvals: renderApprovals,
       sales: renderSales,
@@ -553,6 +559,93 @@
     else renderExpenses();
   }
 
+  function renderReceivedDocs() {
+    const docs = fiscalItems(state.receivedDocs || [], "receivedDate").sort(byDate("receivedDate"));
+    const pending = docs.filter((item) => ["未確認", "支払依頼待ち"].includes(item.status));
+    const noFile = docs.filter((item) => !item.file);
+    const paymentTargets = docs.filter((item) => item.documentType === "請求書" && !item.paymentRequestNo);
+    const paid = docs.filter((item) => item.status === "支払済");
+
+    app.innerHTML = `
+      <div class="grid cols-4">
+        ${summaryCard("未処理", `${pending.length}件`, "確認または支払依頼待ち")}
+        ${summaryCard("請求書未申請", `${paymentTargets.length}件`, "支払依頼に未連携")}
+        ${summaryCard("添付なし", `${noFile.length}件`, "PDF/画像の保存確認")}
+        ${summaryCard("支払済", `${paid.length}件`, "処理完了")}
+      </div>
+
+      <section class="panel" style="margin-top:14px;">
+        <div class="panel-head">
+          <h2>受領書類登録</h2>
+          <button class="button secondary small" id="exportReceivedDocsCsv" type="button">CSV</button>
+        </div>
+        <div class="panel-body">
+          <form id="receivedDocForm" class="form-grid">
+            ${field("receivedDate", "受領日", "date", TODAY)}
+            ${selectField("documentType", "書類種別", receivedDocTypes, "請求書")}
+            ${field("vendor", "発行元・支払先", "text", "")}
+            ${field("title", "件名", "text", "")}
+            ${field("amount", "金額", "number", "")}
+            ${field("dueDate", "支払期限", "date", endOfNextMonth(TODAY))}
+            ${selectField("category", "経費科目", categories(), "未分類")}
+            ${selectField("department", "部門", departments(), departments()[0])}
+            ${selectField("status", "状態", receivedDocStatuses, "未確認")}
+            <label class="field"><span>書類画像/PDF</span><input name="file" type="file" accept="image/*,application/pdf"></label>
+            <label class="field" style="grid-column:1 / -1;"><span>メモ・読み取り文字</span><textarea name="note" placeholder="請求書番号、口座、明細、確認事項など"></textarea></label>
+            <div class="actions" style="grid-column:1 / -1;"><button class="button" type="submit">受領書類登録</button></div>
+          </form>
+        </div>
+      </section>
+
+      <section class="panel" style="margin-top:14px;">
+        <div class="panel-head"><h2>受領書類一覧</h2><span class="badge">${docs.length}件</span></div>
+        <div class="panel-body">
+          <div class="notice info" style="margin-bottom:12px;">取引先から届いた請求書・領収書・納品書などをここに保管します。請求書は「支払依頼化」で申請・承認画面へつなげられます。</div>
+          ${renderReceivedDocTable(docs)}
+        </div>
+      </section>
+    `;
+    document.getElementById("receivedDocForm").addEventListener("submit", handleReceivedDocSubmit);
+    document.getElementById("exportReceivedDocsCsv").addEventListener("click", () => exportCsv("received-docs", docs, receivedDocCsvFields()));
+    bindTableActions();
+  }
+
+  async function handleReceivedDocSubmit(event) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const formData = new FormData(form);
+    const file = formData.get("file");
+    const data = formValues(form);
+    const record = receivedDocRecordFromData({
+      ...data,
+      file: file && file.size ? await readFile(file) : null
+    });
+    state.receivedDocs.push(record);
+    addAudit("受領書類登録", record);
+    persist("受領書類保存");
+    renderReceivedDocs();
+  }
+
+  function receivedDocRecordFromData(data, withId = true) {
+    return {
+      ...(withId ? { id: uid("recv") } : {}),
+      receivedDate: data.receivedDate || TODAY,
+      documentType: data.documentType || "請求書",
+      vendor: data.vendor || "",
+      title: data.title || "",
+      amount: num(data.amount),
+      dueDate: data.dueDate || "",
+      category: data.category || "未分類",
+      department: data.department || departments()[0],
+      status: data.status || "未確認",
+      paymentRequestNo: data.paymentRequestNo || "",
+      paymentRequestStatus: data.paymentRequestStatus || "",
+      file: data.file || null,
+      note: data.note || "",
+      createdAt: new Date().toISOString()
+    };
+  }
+
   function renderApprovals() {
     const requests = fiscalItems(state.paymentRequests, "requestDate").sort(byDate("requestDate"));
     const pending = requests.filter((item) => item.status === "申請中");
@@ -633,6 +726,7 @@
       approver: data.approver || "",
       status: data.status || "申請中",
       linkedExpenseId: data.linkedExpenseId || "",
+      linkedReceivedDocId: data.linkedReceivedDocId || "",
       note: data.note || "",
       createdAt: new Date().toISOString()
     };
@@ -668,6 +762,39 @@
     alert(`支払依頼 ${request.requestNo} を作成しました。`);
     if (activeView === "approvals") renderApprovals();
     else renderExpenses();
+  }
+
+  function createPaymentRequestFromReceivedDoc(doc) {
+    const existing = paymentRequestForReceivedDoc(doc.id);
+    if (existing) {
+      alert(`この受領書類はすでに ${existing.requestNo} として申請されています。`);
+      return;
+    }
+    const request = paymentRequestRecordFromData({
+      requestNo: nextPaymentRequestNo(),
+      requestType: "支払依頼",
+      requestDate: TODAY,
+      dueDate: doc.dueDate || TODAY,
+      vendor: doc.vendor,
+      content: doc.title || `${doc.documentType || "受領書類"} 支払`,
+      category: doc.category || "未分類",
+      department: doc.department || departments()[0],
+      amount: doc.amount,
+      applicant: "",
+      approver: "",
+      status: "申請中",
+      linkedReceivedDocId: doc.id,
+      note: [`受領書類 ${formatDate(doc.receivedDate)} から作成`, doc.note].filter(Boolean).join(" / ")
+    });
+    state.paymentRequests.push(request);
+    doc.paymentRequestNo = request.requestNo;
+    doc.paymentRequestStatus = request.status;
+    doc.status = "申請中";
+    addAudit("受領書類から支払依頼化", { receivedDocId: doc.id, requestNo: request.requestNo });
+    persist("支払依頼化");
+    alert(`支払依頼 ${request.requestNo} を作成しました。`);
+    if (activeView === "approvals") renderApprovals();
+    else renderReceivedDocs();
   }
 
   function renderSales() {
@@ -2168,6 +2295,7 @@
     if (!Array.isArray(state[trashItem.collection])) state[trashItem.collection] = [];
     state[trashItem.collection].push(record);
     if (trashItem.collection === "paymentRequests") syncExpensePaymentRequestStatus(record);
+    if (trashItem.collection === "paymentRequests") syncReceivedDocPaymentRequestStatus(record);
     state.trash = state.trash.filter((item) => item.id !== trashId);
     addAudit(`${collectionLabel(trashItem.collection)}復元`, record);
     persist("復元");
@@ -2202,6 +2330,7 @@
     if (collection === "invoices") return record.serviceDate || record.issueDate || record.expectedPaymentDate || record.paymentDate || "";
     if (collection === "receiptDocs") return record.issueDate || record.paymentDate || "";
     if (collection === "deliveries") return record.date || "";
+    if (collection === "receivedDocs") return record.receivedDate || record.dueDate || "";
     if (collection === "paymentRequests") return record.requestDate || record.dueDate || "";
     if (collection === "partners" || collection === "items" || collection === "recurringDocs") return "";
     if (collection === "payroll") return record.payDate || (record.payMonth ? `${record.payMonth}-01` : "");
@@ -2212,6 +2341,7 @@
   function recordSummary(collection, record) {
     if (!record) return "";
     if (collection === "expenses") return [record.vendor, record.itemName, record.category].filter(Boolean).join(" / ");
+    if (collection === "receivedDocs") return [record.documentType, record.vendor, record.title, record.status].filter(Boolean).join(" / ");
     if (collection === "paymentRequests") return [record.requestNo, record.vendor, record.content, record.status].filter(Boolean).join(" / ");
     if (collection === "sales") return [record.customer, record.content, record.invoiceNo].filter(Boolean).join(" / ");
     if (collection === "invoices") return [record.invoiceNo, record.customer, record.content].filter(Boolean).join(" / ");
@@ -2231,6 +2361,7 @@
   function collectionLabel(collection) {
     const labels = {
       expenses: "経費",
+      receivedDocs: "受領書類",
       paymentRequests: "申請・承認",
       sales: "売上",
       invoices: "請求書",
@@ -2424,19 +2555,58 @@
     `;
   }
 
+  function renderReceivedDocTable(items) {
+    if (!items.length) return `<div class="empty">受領書類はまだありません。</div>`;
+    return `
+      <div class="table-wrap"><table>
+        <thead><tr><th>受領日</th><th>種別</th><th>発行元</th><th>件名</th><th class="num">金額</th><th>支払期限</th><th>状態</th><th>ファイル</th><th>支払依頼</th><th>操作</th></tr></thead>
+        <tbody>${items.map((item) => `<tr>
+          <td>${esc(formatDate(item.receivedDate))}</td><td>${esc(item.documentType || "")}</td><td>${esc(item.vendor || "")}</td><td>${esc(item.title || "")}</td>
+          <td class="num">${yen(item.amount)}</td><td>${esc(formatDate(item.dueDate))}</td><td>${statusBadge(item.status)}</td>
+          <td>${receivedDocFileCell(item)}</td><td>${receivedDocPaymentRequestCell(item)}</td><td>${rowActions("receivedDocs", item.id)}</td>
+        </tr>`).join("")}</tbody>
+      </table></div>
+    `;
+  }
+
+  function receivedDocFileCell(item) {
+    if (!item.file) return '<span class="badge warn">無</span>';
+    const name = item.file.name || "添付ファイル";
+    if (item.file.type && item.file.type.startsWith("image/")) {
+      return `<button class="receipt-thumb mini" data-action="detail" data-collection="receivedDocs" data-id="${esc(item.id)}" type="button" aria-label="受領書類を表示"><img src="${esc(item.file.dataUrl)}" alt="${esc(name)}"></button>`;
+    }
+    return `<span class="badge good">${esc(name)}</span>`;
+  }
+
+  function receivedDocPaymentRequestCell(item) {
+    if (item.paymentRequestNo) {
+      return `${statusBadge(item.paymentRequestStatus || "申請中")}<br>${esc(item.paymentRequestNo)}`;
+    }
+    if (item.documentType === "請求書" || num(item.amount)) {
+      return `<button class="button small secondary" data-action="received-to-payment-request" data-id="${esc(item.id)}" type="button">支払依頼化</button>`;
+    }
+    return '<span class="badge warn">対象外</span>';
+  }
+
   function renderPaymentRequestTable(items) {
     if (!items.length) return `<div class="empty">申請データはありません。</div>`;
     return `
       <div class="table-wrap"><table>
-        <thead><tr><th>申請番号</th><th>種別</th><th>申請日</th><th>支払期限</th><th>支払先</th><th>内容</th><th>科目</th><th class="num">金額</th><th>申請者</th><th>承認者</th><th>状態</th><th>操作</th></tr></thead>
+        <thead><tr><th>申請番号</th><th>種別</th><th>申請日</th><th>支払期限</th><th>支払先</th><th>内容</th><th>科目</th><th class="num">金額</th><th>申請元</th><th>申請者</th><th>承認者</th><th>状態</th><th>操作</th></tr></thead>
         <tbody>${items.map((item) => `<tr>
           <td>${esc(item.requestNo || "")}</td><td>${esc(item.requestType || "")}</td><td>${esc(formatDate(item.requestDate))}</td><td>${esc(formatDate(item.dueDate))}</td>
           <td>${esc(item.vendor || "")}</td><td>${esc(item.content || "")}</td><td>${esc(item.category || "")}</td><td class="num">${yen(item.amount)}</td>
-          <td>${esc(item.applicant || "")}</td><td>${esc(item.approver || "")}</td><td>${statusBadge(item.status)}</td>
+          <td>${paymentRequestSourceBadge(item)}</td><td>${esc(item.applicant || "")}</td><td>${esc(item.approver || "")}</td><td>${statusBadge(item.status)}</td>
           <td><div class="actions">${paymentRequestActionButtons(item)}${rowActions("paymentRequests", item.id)}</div></td>
         </tr>`).join("")}</tbody>
       </table></div>
     `;
+  }
+
+  function paymentRequestSourceBadge(item) {
+    if (item.linkedReceivedDocId) return '<span class="badge good">受領書類</span>';
+    if (item.linkedExpenseId) return '<span class="badge good">経費</span>';
+    return '<span class="badge warn">手入力</span>';
   }
 
   function expensePaymentRequestCell(expense) {
@@ -2713,6 +2883,7 @@
     if (!health.backupOk) alerts.push({ severity: "bad", title: "バックアップ未実施", body: "ブラウザ保存だけでは消失リスクがあります。全体バックアップを保存してください。" });
     if (health.storageWarn) alerts.push({ severity: "warn", title: "保存容量が大きい", body: "証憑画像が増えています。必要に応じて画像サイズを下げてください。" });
     alerts.push(...expenseAlerts(fiscalExpenses));
+    alerts.push(...receivedDocAlerts());
     alerts.push(...paymentRequestAlerts());
     alerts.push(...getInvoiceIssues());
     return alerts;
@@ -2740,6 +2911,18 @@
     const overdue = requests.filter((item) => item.dueDate && item.dueDate < TODAY && item.status !== "支払済");
     if (pending.length) alerts.push({ severity: "warn", title: "未承認の支払依頼", body: `${pending.length}件あります。支払前に承認・差し戻しを確認してください。` });
     if (overdue.length) alerts.push({ severity: "bad", title: "支払依頼期限超過", body: `${overdue.length}件あります。支払期限と支払済み状態を確認してください。` });
+    return alerts;
+  }
+
+  function receivedDocAlerts() {
+    const alerts = [];
+    const docs = fiscalItems(state.receivedDocs || [], "receivedDate");
+    const unconfirmed = docs.filter((item) => item.status === "未確認");
+    const noFile = docs.filter((item) => !item.file);
+    const invoiceNoRequest = docs.filter((item) => item.documentType === "請求書" && !item.paymentRequestNo && num(item.amount));
+    if (unconfirmed.length) alerts.push({ severity: "warn", title: "未確認の受領書類", body: `${unconfirmed.length}件あります。内容確認と保管状況を確認してください。` });
+    if (noFile.length) alerts.push({ severity: "warn", title: "受領書類ファイル未添付", body: `${noFile.length}件あります。画像/PDFを保管してください。` });
+    if (invoiceNoRequest.length) alerts.push({ severity: "warn", title: "請求書の支払依頼未作成", body: `${invoiceNoRequest.length}件あります。必要に応じて支払依頼化してください。` });
     return alerts;
   }
 
@@ -2831,6 +3014,7 @@
         });
         state[collection] = (state[collection] || []).filter((record) => record.id !== id);
         if (collection === "paymentRequests") clearExpensePaymentRequest(item);
+        if (collection === "paymentRequests") clearReceivedDocPaymentRequest(item);
         addAudit(`${collectionLabel(collection)}削除`, item);
         persist("削除保存");
         render();
@@ -2869,6 +3053,13 @@
       button.addEventListener("click", () => {
         const expense = state.expenses.find((item) => item.id === button.dataset.id);
         if (expense) createPaymentRequestFromExpense(expense);
+      });
+    });
+
+    app.querySelectorAll("[data-action='received-to-payment-request']").forEach((button) => {
+      button.addEventListener("click", () => {
+        const doc = (state.receivedDocs || []).find((item) => item.id === button.dataset.id);
+        if (doc) createPaymentRequestFromReceivedDoc(doc);
       });
     });
 
@@ -2977,6 +3168,7 @@
     }
     if (status === "支払済") request.paidAt = TODAY;
     syncExpensePaymentRequestStatus(request);
+    syncReceivedDocPaymentRequestStatus(request);
     addAudit(`支払依頼${status}`, request);
     persist("支払依頼更新");
     renderApprovals();
@@ -2986,9 +3178,9 @@
     const item = (state[collection] || []).find((record) => record.id === id);
     if (!item) return;
     dialogTitle.textContent = "詳細";
-    const proof = item.proof;
+    const proof = item.proof || item.file;
     const rows = Object.entries(item)
-      .filter(([key]) => !["id", "proof"].includes(key))
+      .filter(([key]) => !["id", "proof", "file"].includes(key))
       .map(([key, value]) => `<dt>${esc(labelFor(key))}</dt><dd>${esc(displayValue(key, value))}</dd>`)
       .join("");
     dialogBody.innerHTML = `
@@ -3046,6 +3238,24 @@
         <label class="field"><span>証憑差し替え</span><input name="proof" type="file" accept="image/*,application/pdf"></label>
         <div class="notice info" style="grid-column:1 / -1;">証憑を選ばない場合、現在の証憑をそのまま残します。</div>
         <label class="field" style="grid-column:1 / -1;"><span>摘要</span><textarea name="note">${esc(item.note || "")}</textarea></label>
+      `;
+    }
+    if (collection === "receivedDocs") {
+      return `
+        ${field("receivedDate", "受領日", "date", item.receivedDate || TODAY)}
+        ${selectField("documentType", "書類種別", receivedDocTypes, item.documentType || "請求書")}
+        ${field("vendor", "発行元・支払先", "text", item.vendor || "")}
+        ${field("title", "件名", "text", item.title || "")}
+        ${field("amount", "金額", "number", item.amount || "")}
+        ${field("dueDate", "支払期限", "date", item.dueDate || "")}
+        ${selectField("category", "経費科目", categories(), item.category || "未分類")}
+        ${selectField("department", "部門", departments(), item.department || departments()[0])}
+        ${selectField("status", "状態", receivedDocStatuses, item.status || "未確認")}
+        ${field("paymentRequestNo", "支払依頼番号", "text", item.paymentRequestNo || "")}
+        ${field("paymentRequestStatus", "支払依頼状態", "text", item.paymentRequestStatus || "")}
+        <label class="field"><span>書類差し替え</span><input name="file" type="file" accept="image/*,application/pdf"></label>
+        <div class="notice info" style="grid-column:1 / -1;">書類を選ばない場合、現在のファイルをそのまま残します。</div>
+        <label class="field" style="grid-column:1 / -1;"><span>メモ</span><textarea name="note">${esc(item.note || "")}</textarea></label>
       `;
     }
     if (collection === "paymentRequests") {
@@ -3246,7 +3456,7 @@
     const numericFields = ["quantity", "unitPrice", "amount", "mileage", "fuelClaim", "lodging", "total", "basePay", "allowance", "deduction", "netPay", "dayOfMonth"];
 
     Object.entries(data).forEach(([key, value]) => {
-      if (key === "proof" || key === "invoiceEligible") return;
+      if (key === "proof" || key === "file" || key === "invoiceEligible") return;
       if (/^line(ItemName|Quantity|Unit|UnitPrice|TaxRate)\d+$/.test(key)) return;
       item[key] = numericFields.includes(key) ? num(value) : clean(value);
     });
@@ -3260,6 +3470,15 @@
       const proofFile = formData.get("proof");
       if (proofFile && proofFile.size) item.proof = await readFile(proofFile);
     }
+    if (collection === "receivedDocs") {
+      const file = formData.get("file");
+      if (file && file.size) item.file = await readFile(file);
+      const request = paymentRequestForReceivedDoc(item.id);
+      if (request) {
+        item.paymentRequestNo = request.requestNo;
+        item.paymentRequestStatus = request.status;
+      }
+    }
     if (collection === "trips" && !num(item.total)) item.total = num(item.fuelClaim) + num(item.lodging);
     if (collection === "payroll" && !num(item.netPay)) item.netPay = num(item.basePay) + num(item.allowance) - num(item.deduction);
     if (collection === "sales") markInvoicePaidFromSale(item);
@@ -3267,6 +3486,7 @@
     if (collection === "paymentRequests") {
       if (item.status === "支払済" && !item.paidAt) item.paidAt = TODAY;
       syncExpensePaymentRequestStatus(item);
+      syncReceivedDocPaymentRequestStatus(item);
     }
     if (["estimates", "invoices", "deliveries", "receiptDocs"].includes(collection)) {
       item.lines = documentLinesFromData(data, {
@@ -3309,6 +3529,7 @@
       checks: getAlerts(),
       dataHealth: getDataHealth(),
       expenses: fiscalItems(state.expenses, "date"),
+      receivedDocs: fiscalItems(state.receivedDocs || [], "receivedDate"),
       paymentRequests: fiscalItems(state.paymentRequests || [], "requestDate"),
       sales: fiscalItems(state.sales, "date"),
       invoices: fiscalInvoices(),
@@ -3420,6 +3641,7 @@
   function monthlyHandoffData(month) {
     const inMonth = (date) => String(date || "").slice(0, 7) === month;
     const expenses = state.expenses.filter((item) => inMonth(item.date)).sort(byDate("date"));
+    const receivedDocs = (state.receivedDocs || []).filter((item) => [item.receivedDate, item.dueDate].some(inMonth)).sort(byDate("receivedDate"));
     const sales = state.sales.filter((item) => inMonth(item.date)).sort(byDate("date"));
     const invoices = state.invoices
       .filter((item) => [item.issueDate, item.serviceDate, item.dueDate, item.expectedPaymentDate, item.paymentDate].some(inMonth))
@@ -3433,7 +3655,7 @@
       const rows = expenses.filter((item) => item.paymentMethod === key);
       return { key, label, count: rows.length, amount: sum(rows, "amount") };
     });
-    const data = { month, expenses, paymentRequests, sales, invoices, estimates, deliveries, receiptDocs, closings, paymentRows };
+    const data = { month, expenses, receivedDocs, paymentRequests, sales, invoices, estimates, deliveries, receiptDocs, closings, paymentRows };
     data.issues = monthlyHandoffIssues(data);
     return data;
   }
@@ -3441,6 +3663,8 @@
   function monthlyHandoffIssues(data) {
     const issues = [];
     const missingProof = data.expenses.filter((item) => !item.proof);
+    const unconfirmedReceivedDocs = (data.receivedDocs || []).filter((item) => item.status === "未確認");
+    const receivedDocsWithoutFile = (data.receivedDocs || []).filter((item) => !item.file);
     const missingRegistration = data.expenses.filter((item) => num(item.amount) >= 10000 && item.invoiceEligible && !isValidRegistration(item.registrationNumber));
     const duplicates = duplicateExpenseGroups(data.expenses);
     const pendingRequests = (data.paymentRequests || []).filter((item) => !["承認済", "支払済"].includes(item.status));
@@ -3451,6 +3675,8 @@
     if (!midClosed) issues.push({ severity: "warn", title: "15日前後の締め未完了", body: "中間締めの確認状況を残してください。" });
     if (!monthClosed) issues.push({ severity: "warn", title: "月末締め未完了", body: "月末締めが完了していない月です。" });
     if (missingProof.length) issues.push({ severity: "warn", title: "証憑未添付", body: `${missingProof.length}件あります。画像/PDFを確認してください。` });
+    if (unconfirmedReceivedDocs.length) issues.push({ severity: "warn", title: "未確認の受領書類", body: `${unconfirmedReceivedDocs.length}件あります。請求書・領収書の内容確認を残してください。` });
+    if (receivedDocsWithoutFile.length) issues.push({ severity: "warn", title: "受領書類ファイル未添付", body: `${receivedDocsWithoutFile.length}件あります。画像/PDFを保管してください。` });
     if (missingRegistration.length) issues.push({ severity: "bad", title: "T番号要確認", body: `${missingRegistration.length}件あります。1万円以上・適格のものは担当税理士に確認が必要。` });
     if (duplicates.length) issues.push({ severity: "warn", title: "経費重複の疑い", body: `${duplicates.length}組あります。同じ日付・取引先・金額を確認してください。` });
     if (pendingRequests.length) issues.push({ severity: "warn", title: "未承認の支払依頼", body: `${pendingRequests.length}件あります。承認または差し戻し状況を確認してください。` });
@@ -3498,6 +3724,7 @@
   <div class="grid">
     <div class="card"><span>経費</span><strong>${esc(yen(expenseTotal))}</strong><span>${data.expenses.length}件</span></div>
     <div class="card"><span>証憑添付</span><strong>${proofCount}/${data.expenses.length}</strong><span>${data.expenses.length - proofCount}件未添付</span></div>
+    <div class="card"><span>受領書類</span><strong>${(data.receivedDocs || []).length}件</strong><span>${esc(yen(sum(data.receivedDocs || [], "amount")))}</span></div>
     <div class="card"><span>売上入金</span><strong>${esc(yen(salesTotal))}</strong><span>${data.sales.length}件</span></div>
     <div class="card"><span>請求書</span><strong>${esc(yen(invoiceTotal))}</strong><span>${data.invoices.length}件</span></div>
     <div class="card"><span>納品書</span><strong>${data.deliveries.length}件</strong><span>${esc(yen(sum(data.deliveries, "amount")))}</span></div>
@@ -3515,6 +3742,9 @@
 
   <h2>支払依頼・承認</h2>
   ${(data.paymentRequests || []).length ? `<table><thead><tr><th>申請番号</th><th>申請日</th><th>支払期限</th><th>支払先</th><th>内容</th><th>状態</th><th class="num">金額</th></tr></thead><tbody>${data.paymentRequests.map((item) => `<tr><td>${esc(item.requestNo || "")}</td><td>${esc(formatDate(item.requestDate))}</td><td>${esc(formatDate(item.dueDate))}</td><td>${esc(item.vendor || "")}</td><td>${esc(item.content || "")}</td><td>${esc(item.status || "")}</td><td class="num">${esc(yen(item.amount))}</td></tr>`).join("")}</tbody></table>` : `<p class="muted">この月の支払依頼はありません。</p>`}
+
+  <h2>受領書類</h2>
+  ${(data.receivedDocs || []).length ? `<table><thead><tr><th>受領日</th><th>種別</th><th>発行元</th><th>件名</th><th>状態</th><th>支払依頼</th><th class="num">金額</th></tr></thead><tbody>${data.receivedDocs.map((item) => `<tr><td>${esc(formatDate(item.receivedDate))}</td><td>${esc(item.documentType || "")}</td><td>${esc(item.vendor || "")}</td><td>${esc(item.title || "")}</td><td>${esc(item.status || "")}</td><td>${esc(item.paymentRequestNo || "")}</td><td class="num">${esc(yen(item.amount))}</td></tr>`).join("")}</tbody></table>` : `<p class="muted">この月の受領書類はありません。</p>`}
 
   <h2>経費・証憑</h2>
   ${data.expenses.length ? `<table><thead><tr><th>日付</th><th>支払</th><th>取引先/品名</th><th>科目</th><th class="num">金額</th><th>T番号</th><th>証憑</th></tr></thead><tbody>${data.expenses.map((item) => `
@@ -4992,6 +5222,10 @@
     return (state.paymentRequests || []).find((item) => item.linkedExpenseId && item.linkedExpenseId === expenseId) || null;
   }
 
+  function paymentRequestForReceivedDoc(receivedDocId) {
+    return (state.paymentRequests || []).find((item) => item.linkedReceivedDocId && item.linkedReceivedDocId === receivedDocId) || null;
+  }
+
   function syncExpensePaymentRequestStatus(request) {
     if (!request || !request.linkedExpenseId) return;
     const expense = state.expenses.find((item) => item.id === request.linkedExpenseId);
@@ -5010,9 +5244,30 @@
     expense.updatedAt = new Date().toISOString();
   }
 
+  function syncReceivedDocPaymentRequestStatus(request) {
+    if (!request || !request.linkedReceivedDocId) return;
+    const doc = (state.receivedDocs || []).find((item) => item.id === request.linkedReceivedDocId);
+    if (!doc) return;
+    doc.paymentRequestNo = request.requestNo;
+    doc.paymentRequestStatus = request.status;
+    if (["申請中", "承認済", "支払済"].includes(request.status)) doc.status = request.status;
+    if (request.status === "差し戻し") doc.status = "支払依頼待ち";
+    doc.updatedAt = new Date().toISOString();
+  }
+
+  function clearReceivedDocPaymentRequest(request) {
+    if (!request || !request.linkedReceivedDocId) return;
+    const doc = (state.receivedDocs || []).find((item) => item.id === request.linkedReceivedDocId);
+    if (!doc) return;
+    delete doc.paymentRequestNo;
+    delete doc.paymentRequestStatus;
+    if (["申請中", "承認済", "支払済"].includes(doc.status)) doc.status = "支払依頼待ち";
+    doc.updatedAt = new Date().toISOString();
+  }
+
   function statusBadge(value) {
     const text = value || "未処理";
-    const cls = ["完了", "入金済", "受注", "送付済", "郵送済", "メール", "郵送", "承認済", "支払済"].includes(text) ? "good" : ["期限超過", "保留", "失注", "差し戻し"].includes(text) ? "bad" : "warn";
+    const cls = ["完了", "入金済", "受注", "送付済", "郵送済", "メール", "郵送", "承認済", "支払済", "保管"].includes(text) ? "good" : ["期限超過", "保留", "失注", "差し戻し"].includes(text) ? "bad" : "warn";
     return `<span class="badge ${cls}">${esc(text)}</span>`;
   }
 
@@ -5241,8 +5496,12 @@
     return [["receiptNo", "領収書番号"], ["issueDate", "発行日"], ["paymentDate", "入金日"], ["customer", "取引先"], ["invoiceNo", "請求書番号"], ["content", "内容"], ["amount", "金額"], ["lines", "明細"], ["taxRate", "税区分"], ["sendStatus", "送付状態"], ["sendDate", "送付日"], ["template", "テンプレート"], ["note", "備考"]];
   }
 
+  function receivedDocCsvFields() {
+    return [["receivedDate", "受領日"], ["documentType", "書類種別"], ["vendor", "発行元・支払先"], ["title", "件名"], ["amount", "金額"], ["dueDate", "支払期限"], ["category", "経費科目"], ["department", "部門"], ["status", "状態"], ["paymentRequestNo", "支払依頼番号"], ["paymentRequestStatus", "支払依頼状態"], ["note", "メモ"]];
+  }
+
   function paymentRequestCsvFields() {
-    return [["requestNo", "申請番号"], ["requestType", "申請種別"], ["requestDate", "申請日"], ["dueDate", "支払期限"], ["vendor", "支払先"], ["content", "内容"], ["category", "経費科目"], ["department", "部門"], ["amount", "金額"], ["applicant", "申請者"], ["approver", "承認者"], ["status", "状態"], ["linkedExpenseId", "関連経費ID"], ["submittedAt", "申請日時"], ["approvedAt", "承認日時"], ["returnedAt", "差戻し日時"], ["paidAt", "支払済日"], ["note", "メモ"]];
+    return [["requestNo", "申請番号"], ["requestType", "申請種別"], ["requestDate", "申請日"], ["dueDate", "支払期限"], ["vendor", "支払先"], ["content", "内容"], ["category", "経費科目"], ["department", "部門"], ["amount", "金額"], ["applicant", "申請者"], ["approver", "承認者"], ["status", "状態"], ["linkedExpenseId", "関連経費ID"], ["linkedReceivedDocId", "関連受領書類ID"], ["submittedAt", "申請日時"], ["approvedAt", "承認日時"], ["returnedAt", "差戻し日時"], ["paidAt", "支払済日"], ["note", "メモ"]];
   }
 
   function recurringCsvFields() {
@@ -5365,6 +5624,9 @@
       paymentMethod: "支払区分",
       paymentRequestNo: "支払依頼番号",
       paymentRequestStatus: "支払依頼状態",
+      receivedDate: "受領日",
+      documentType: "書類種別",
+      file: "受領ファイル",
       taxRate: "税区分",
       registrationNumber: "T番号",
       invoiceEligible: "インボイス適格",
@@ -5376,6 +5638,7 @@
       applicant: "申請者",
       approver: "承認者",
       linkedExpenseId: "関連経費ID",
+      linkedReceivedDocId: "関連受領書類ID",
       submittedAt: "申請日時",
       approvedAt: "承認日時",
       returnedAt: "差戻し日時",
