@@ -3277,7 +3277,7 @@
                 <div class="receipt-meta"><span>${esc(formatDate(item.date))}</span>${paymentBadge(item.paymentMethod)}</div>
                 <strong>${esc(item.vendor || item.itemName || "未入力")}</strong>
                 <div class="receipt-meta"><span>${esc(item.category)}${item.splitGroupId ? " / 税率分割" : ""}</span><strong>${yen(item.amount)}</strong></div>
-                <div class="actions">${rowActions("expenses", item.id)}</div>
+                <div class="actions">${splitProofAction(item)}${rowActions("expenses", item.id)}</div>
               </div>
             </article>
           `).join("")}
@@ -3510,6 +3510,10 @@
 
     app.querySelectorAll("[data-action='preview']").forEach((button) => {
       button.addEventListener("click", () => showDetail("expenses", button.dataset.id));
+    });
+
+    app.querySelectorAll("[data-action='attach-split-proof']").forEach((input) => {
+      input.addEventListener("change", (event) => attachSplitProof(event.currentTarget));
     });
 
     app.querySelectorAll("[data-action='send-draft']").forEach((button) => {
@@ -5843,6 +5847,40 @@
     const label = paymentLabel(value);
     const cls = value === "card" ? "card" : value === "cash" ? "cash" : value === "bank" ? "bank" : "";
     return `<span class="badge ${cls}">${esc(label)}</span>`;
+  }
+
+  function splitProofAction(item) {
+    if (!item || !item.splitGroupId) return "";
+    const label = item.proof ? "分割画像差替" : "分割画像添付";
+    return `<label class="button small secondary file-button">${esc(label)}<input data-action="attach-split-proof" data-split-group-id="${esc(item.splitGroupId)}" type="file" accept="image/*,application/pdf"></label>`;
+  }
+
+  async function attachSplitProof(input) {
+    const file = input.files && input.files[0];
+    const groupId = clean(input.dataset.splitGroupId);
+    if (!file || !groupId) return;
+    const targets = state.expenses.filter((item) => item.splitGroupId === groupId);
+    if (!targets.length) return;
+    if (targets.some((record) => isLockedRecordMonth("expenses", record, "証憑添付", { silent: true, noAudit: true }))) {
+      alert(lockedMonthMessage((targets[0].date || "").slice(0, 7), "証憑添付"));
+      input.value = "";
+      return;
+    }
+    try {
+      const proof = await readFile(file);
+      const now = new Date().toISOString();
+      targets.forEach((record) => {
+        record.proof = proof;
+        record.updatedAt = now;
+      });
+      addAudit("税率分割証憑添付", { id: groupId, count: targets.length, fileName: file.name });
+      persist("証憑添付");
+      render();
+    } catch (error) {
+      console.error(error);
+      alert("証憑画像/PDFを読み込めませんでした。");
+      input.value = "";
+    }
   }
 
   function paymentLabel(value) {
