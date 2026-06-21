@@ -286,6 +286,23 @@
     fiscalYearSelect.value = selectedFiscalYear;
   }
 
+  function ensureFiscalYearOption(year) {
+    const fiscalYear = Number(year);
+    if (!Number.isFinite(fiscalYear)) return;
+    const years = [...new Set([...fiscalYearSelect.options].map((option) => Number(option.value)).concat(fiscalYear))]
+      .filter(Number.isFinite)
+      .sort((a, b) => a - b);
+    fiscalYearSelect.innerHTML = years.map((item) => `<option value="${item}">${item}年度</option>`).join("");
+    fiscalYearSelect.value = fiscalYear;
+  }
+
+  function showFiscalYearForDate(date) {
+    const fiscalYear = getFiscalYear(date || TODAY);
+    ensureFiscalYearOption(fiscalYear);
+    selectedFiscalYear = fiscalYear;
+    fiscalYearSelect.value = fiscalYear;
+  }
+
   function render() {
     const [title, subtitle] = pageMeta[activeView] || pageMeta.dashboard;
     const range = getFiscalRange(selectedFiscalYear);
@@ -626,8 +643,8 @@
       records.forEach((record) => state.expenses.push(record));
       addAudit("経費税率別登録", { count: records.length, vendor: clean(data.get("vendor")), total: sum(records, "amount") });
       persist("税率別経費保存");
-      if (activeView === "receipts") renderReceipts();
-      else renderExpenses();
+      showFiscalYearForDate(records[0].date);
+      render();
       return;
     }
 
@@ -653,8 +670,8 @@
     state.expenses.push(record);
     addAudit("経費登録", record);
     persist("経費保存");
-    if (activeView === "receipts") renderReceipts();
-    else renderExpenses();
+    showFiscalYearForDate(record.date);
+    render();
   }
 
   function buildTaxSplitExpenseRecords(data, options = {}) {
