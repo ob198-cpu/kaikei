@@ -322,6 +322,40 @@ h3 {
   grid-template-columns: repeat(4, minmax(160px, 1fr));
 }
 
+.tax-split-box {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f7f9fc;
+}
+
+.tax-split-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.tax-split-head strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.tax-split-head p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.tax-split-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(3, minmax(150px, 1fr));
+}
+
 .document-builder {
   display: grid;
   grid-template-columns: minmax(0, 1.25fr) minmax(280px, 0.75fr);
@@ -1151,6 +1185,10 @@ dialog::backdrop {
     grid-template-columns: repeat(2, minmax(160px, 1fr));
   }
 
+  .tax-split-grid {
+    grid-template-columns: repeat(2, minmax(150px, 1fr));
+  }
+
   .document-builder {
     grid-template-columns: 1fr;
   }
@@ -1192,8 +1230,13 @@ dialog::backdrop {
   .approval-board,
   .filter-bar,
   .document-builder .form-grid,
-  .form-grid {
+  .form-grid,
+  .tax-split-grid {
     grid-template-columns: 1fr;
+  }
+
+  .tax-split-head {
+    flex-direction: column;
   }
 
   .content {

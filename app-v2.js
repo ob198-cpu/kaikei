@@ -387,7 +387,7 @@
 
         <section class="panel">
           <div class="panel-head">
-            <h2>Money Forward機能対応</h2>
+            <h2>機能対応</h2>
             <span class="badge good">10項目</span>
           </div>
           <div class="panel-body">
@@ -469,10 +469,7 @@
     `;
 
     document.getElementById("receiptForm").addEventListener("submit", handleExpenseSubmit);
-    document.getElementById("detectPaymentButton").addEventListener("click", () => {
-      const form = document.getElementById("receiptForm");
-      form.elements.paymentMethod.value = detectPayment(`${form.elements.note.value} ${form.elements.proof.value}`) || form.elements.paymentMethod.value;
-    });
+    bindExpenseFormHelpers("receiptForm");
     bindReceiptActions();
   }
 
@@ -523,13 +520,43 @@
     `;
 
     document.getElementById("expenseForm").addEventListener("submit", handleExpenseSubmit);
+    bindExpenseFormHelpers("expenseForm");
     document.getElementById("exportExpensesCsv").addEventListener("click", () => exportCsv("expenses", expenses, [
       ["date", "日付"], ["category", "経費科目"], ["department", "部門"], ["vendor", "取引先"], ["itemName", "品名"],
       ["quantity", "個数"], ["unitPrice", "単価"], ["amount", "金額"], ["paymentMethod", "支払区分"],
-      ["paymentRequestNo", "支払依頼番号"], ["paymentRequestStatus", "支払依頼状態"], ["taxRate", "税区分"], ["registrationNumber", "T番号"], ["invoiceEligible", "インボイス適格"], ["note", "摘要"]
+      ["paymentRequestNo", "支払依頼番号"], ["paymentRequestStatus", "支払依頼状態"], ["taxRate", "税区分"], ["registrationNumber", "T番号"], ["invoiceEligible", "インボイス適格"], ["splitGroupId", "税率分割ID"], ["note", "摘要"]
     ]));
     bindFilterControls("expenses");
     bindTableActions();
+  }
+
+  function bindExpenseFormHelpers(formId) {
+    const form = document.getElementById(formId);
+    if (!form) return;
+    const detectButton = form.querySelector("#detectPaymentButton");
+    if (detectButton) {
+      detectButton.addEventListener("click", () => {
+        form.elements.paymentMethod.value = detectPayment(`${form.elements.note.value} ${form.elements.proof.value}`) || form.elements.paymentMethod.value;
+      });
+    }
+    const tsuruhaButton = form.querySelector("[data-action='fill-tsuruha-example']");
+    if (tsuruhaButton) tsuruhaButton.addEventListener("click", () => fillTsuruhaExample(form));
+  }
+
+  function fillTsuruhaExample(form) {
+    form.elements.date.value = "2026-03-01";
+    form.elements.vendor.value = "ツルハドラッグ 福井店";
+    if ([...form.elements.category.options].some((option) => option.value === "消耗品費")) form.elements.category.value = "消耗品費";
+    form.elements.itemName.value = "ツルハ購入分";
+    form.elements.quantity.value = "1";
+    form.elements.unitPrice.value = "";
+    form.elements.amount.value = "22436";
+    form.elements.taxRate.value = "10%";
+    form.elements.registrationNumber.value = "T1430001010672";
+    form.elements.split10Amount.value = "8716";
+    form.elements.split8Amount.value = "13720";
+    form.elements.splitMemo.value = "ツルハ領収書の10%・8%対象額を分割";
+    form.elements.note.value = "支払方法はレシートで未確認。カード明細があればカードへ変更。業務用途を追記。";
   }
 
   function expenseForm(id, buttonLabel, showDetectButton) {
@@ -552,8 +579,23 @@
           <span>摘要・読み取り文字</span>
           <textarea name="note" placeholder="カード払い、現金、口座振込、領収書の文字など"></textarea>
         </label>
+        <div class="tax-split-box" style="grid-column:1 / -1;">
+          <div class="tax-split-head">
+            <div>
+              <strong>10%と8%が混ざるレシート</strong>
+              <p>ツルハのように税率別対象額が印字されている場合は、ここに金額を入れて税率別に2行登録します。T番号、支払区分、証憑画像は同じ内容で引き継ぎます。</p>
+            </div>
+            <button class="button secondary small" data-action="fill-tsuruha-example" type="button">ツルハ例を入力</button>
+          </div>
+          <div class="tax-split-grid">
+            ${field("split10Amount", "10%対象額", "number", "", "例: 8716")}
+            ${field("split8Amount", "8%対象額", "number", "", "例: 13720")}
+            ${field("splitMemo", "分割メモ", "text", "", "例: 税率別に分割登録")}
+          </div>
+        </div>
         <div class="actions" style="grid-column:1 / -1;">
           <button class="button" type="submit">${esc(buttonLabel)}</button>
+          <button class="button secondary" data-submit-mode="tax-split" type="submit">税率別に登録</button>
           ${showDetectButton ? `<button class="button secondary" id="detectPaymentButton" type="button">支払区分を判定</button>` : ""}
         </div>
       </form>
@@ -570,6 +612,24 @@
     const proofFile = data.get("proof");
     const proof = proofFile && proofFile.size ? await readFile(proofFile) : null;
     const paymentMethod = detectPayment(`${data.get("note") || ""} ${proofFile && proofFile.name ? proofFile.name : ""}`) || clean(data.get("paymentMethod")) || "cash";
+    const splitMode = event.submitter && event.submitter.dataset.submitMode === "tax-split";
+    if (splitMode) {
+      const records = buildTaxSplitExpenseRecords(data, { paymentMethod, proof });
+      if (!records.length) {
+        alert("10%対象額または8%対象額を入力してください。");
+        return;
+      }
+      if (records.some((record) => isLockedRecordMonth("expenses", record, "税率別登録", { silent: true, noAudit: true }))) {
+        alert(lockedMonthMessage((records[0].date || "").slice(0, 7), "税率別登録"));
+        return;
+      }
+      records.forEach((record) => state.expenses.push(record));
+      addAudit("経費税率別登録", { count: records.length, vendor: clean(data.get("vendor")), total: sum(records, "amount") });
+      persist("税率別経費保存");
+      if (activeView === "receipts") renderReceipts();
+      else renderExpenses();
+      return;
+    }
 
     const record = {
       id: uid("exp"),
@@ -589,11 +649,48 @@
       proof,
       createdAt: new Date().toISOString()
     };
+    if (isLockedRecordMonth("expenses", record, "登録")) return;
     state.expenses.push(record);
     addAudit("経費登録", record);
     persist("経費保存");
     if (activeView === "receipts") renderReceipts();
     else renderExpenses();
+  }
+
+  function buildTaxSplitExpenseRecords(data, options = {}) {
+    const splitRows = [
+      { amount: num(data.get("split10Amount")), taxRate: "10%", label: "10%対象" },
+      { amount: num(data.get("split8Amount")), taxRate: "8%", label: "8%対象" }
+    ].filter((row) => row.amount > 0);
+    if (!splitRows.length) return [];
+
+    const baseItemName = clean(data.get("itemName")) || "レシート購入分";
+    const baseNote = clean(data.get("note"));
+    const splitMemo = clean(data.get("splitMemo"));
+    const total = splitRows.reduce((acc, row) => acc + row.amount, 0);
+    const splitText = `税率別分割 / 合計 ${yen(total)} / ${splitRows.map((row) => `${row.taxRate} ${yen(row.amount)}`).join(" / ")}`;
+    const groupId = uid("split");
+    const createdAt = new Date().toISOString();
+
+    return splitRows.map((row) => ({
+      id: uid("exp"),
+      splitGroupId: groupId,
+      date: clean(data.get("date")) || TODAY,
+      vendor: clean(data.get("vendor")),
+      category: clean(data.get("category")) || "未分類",
+      department: clean(data.get("department")) || departments()[0],
+      itemName: `${baseItemName} ${row.label}`,
+      quantity: 1,
+      unitPrice: row.amount,
+      amount: row.amount,
+      taxRate: row.taxRate,
+      paymentMethod: options.paymentMethod || clean(data.get("paymentMethod")) || "cash",
+      registrationNumber: normalizeRegistration(data.get("registrationNumber")),
+      invoiceEligible: Boolean(data.get("invoiceEligible")),
+      note: [baseNote, splitMemo, splitText].filter(Boolean).join(" / "),
+      proof: options.proof || null,
+      createdAt
+    }));
   }
 
   function renderReceivedDocs() {
@@ -657,6 +754,7 @@
       ...data,
       file: file && file.size ? await readFile(file) : null
     });
+    if (isLockedRecordMonth("receivedDocs", record, "登録")) return;
     state.receivedDocs.push(record);
     addAudit("受領書類登録", record);
     persist("受領書類保存");
@@ -801,6 +899,7 @@
     event.preventDefault();
     const data = formValues(event.currentTarget);
     const record = paymentRequestRecordFromData(data);
+    if (isLockedRecordMonth("paymentRequests", record, "登録")) return;
     state.paymentRequests.push(record);
     addAudit("支払依頼登録", record);
     persist("支払依頼保存");
@@ -835,6 +934,7 @@
       alert(`この経費はすでに ${existing.requestNo} として申請されています。`);
       return;
     }
+    if (isLockedRecordMonth("expenses", expense, "支払依頼化")) return;
     const request = paymentRequestRecordFromData({
       requestNo: nextPaymentRequestNo(),
       requestType: "支払依頼",
@@ -851,6 +951,7 @@
       linkedExpenseId: expense.id,
       note: [`経費 ${formatDate(expense.date)} から作成`, expense.note].filter(Boolean).join(" / ")
     });
+    if (isLockedRecordMonth("paymentRequests", request, "支払依頼化")) return;
     state.paymentRequests.push(request);
     expense.paymentRequestNo = request.requestNo;
     expense.paymentRequestStatus = request.status;
@@ -867,6 +968,7 @@
       alert(`この受領書類はすでに ${existing.requestNo} として申請されています。`);
       return;
     }
+    if (isLockedRecordMonth("receivedDocs", doc, "支払依頼化")) return;
     const request = paymentRequestRecordFromData({
       requestNo: nextPaymentRequestNo(),
       requestType: "支払依頼",
@@ -883,6 +985,7 @@
       linkedReceivedDocId: doc.id,
       note: [`受領書類 ${formatDate(doc.receivedDate)} から作成`, doc.note].filter(Boolean).join(" / ")
     });
+    if (isLockedRecordMonth("paymentRequests", request, "支払依頼化")) return;
     state.paymentRequests.push(request);
     doc.paymentRequestNo = request.requestNo;
     doc.paymentRequestStatus = request.status;
@@ -962,6 +1065,7 @@
       note: data.note,
       createdAt: new Date().toISOString()
     };
+    if (isLockedRecordMonth("sales", record, "登録")) return;
     state.sales.push(record);
     markInvoicePaidFromSale(record);
     addAudit("売上登録", record);
@@ -1078,6 +1182,7 @@
       note: data.note,
       createdAt: new Date().toISOString()
     };
+    if (isLockedRecordMonth("invoices", record, "登録")) return;
     state.invoices.push(record);
     addAudit("請求書登録", record);
     persist("請求書保存");
@@ -1154,6 +1259,7 @@
       note: data.note,
       createdAt: new Date().toISOString()
     };
+    if (isLockedRecordMonth("estimates", record, "登録")) return;
     state.estimates.push(record);
     addAudit("見積登録", record);
     persist("見積保存");
@@ -1210,6 +1316,7 @@
     event.preventDefault();
     const data = formValues(event.currentTarget);
     const record = deliveryRecordFromData(data);
+    if (isLockedRecordMonth("deliveries", record, "登録")) return;
     state.deliveries.push(record);
     addAudit("納品書登録", record);
     persist("納品書保存");
@@ -1262,6 +1369,7 @@
     event.preventDefault();
     const data = formValues(event.currentTarget);
     const record = receiptDocRecordFromData(data);
+    if (isLockedRecordMonth("receiptDocs", record, "登録")) return;
     state.receiptDocs.push(record);
     addAudit("領収書登録", record);
     persist("領収書保存");
@@ -1820,6 +1928,7 @@
     });
     if (type === "trips" && !record.total) record.total = num(record.fuelClaim) + num(record.lodging);
     if (type === "payroll" && !record.netPay) record.netPay = num(record.basePay) + num(record.allowance) - num(record.deduction);
+    if (isLockedRecordMonth(type, record, "登録")) return;
     state[type].push(record);
     addAudit(`${ledgerTitle(type)}登録`, record);
     persist(`${ledgerTitle(type)}保存`);
@@ -1860,7 +1969,7 @@
     document.getElementById("importCardCsvInput").addEventListener("change", importCardCsv);
     document.getElementById("exportCardCsv").addEventListener("click", () => exportCsv("card-ledger", cardExpenses, [
       ["date", "日付"], ["vendor", "取引先"], ["category", "経費科目"], ["department", "部門"], ["itemName", "品名"],
-      ["amount", "金額"], ["taxRate", "税区分"], ["registrationNumber", "T番号"], ["invoiceEligible", "インボイス適格"], ["note", "摘要"]
+      ["amount", "金額"], ["taxRate", "税区分"], ["registrationNumber", "T番号"], ["invoiceEligible", "インボイス適格"], ["splitGroupId", "税率分割ID"], ["note", "摘要"]
     ]));
     bindMonthlyHandoffActions();
     bindTableActions();
@@ -2296,6 +2405,7 @@
       source: "manual",
       createdAt: new Date().toISOString()
     };
+    if (isLockedRecordMonth("journals", record, "登録")) return;
     state.journals.push(record);
     addAudit("仕訳登録", record);
     persist("仕訳保存");
@@ -2510,7 +2620,7 @@
     const trashItem = (state.trash || []).find((item) => item.id === trashId);
     if (!trashItem) return;
     const record = trashItem.record;
-    if (isMonthLocked(recordMonth(trashItem.collection, record))) {
+    if (hasLockedRecordMonth(trashItem.collection, record)) {
       alert("この月は月末締めが完了しているため、復元できません。締め状態を確認してください。");
       return;
     }
@@ -2540,27 +2650,76 @@
     return state.closings.some((item) => item.month === month && item.closeType === "月末" && item.status === "完了");
   }
 
+  function lockedMonthMessage(month, action) {
+    const label = month ? `${month.slice(0, 4)}年${Number(month.slice(5, 7))}月` : "対象月";
+    return `${label}は月末締めが完了しているため、${action}できません。締め状態を確認してください。`;
+  }
+
+  function isLockedRecordMonth(collection, record, action = "登録", options = {}) {
+    const month = lockedRecordMonth(collection, record);
+    if (!month || !isMonthLocked(month)) return false;
+    if (!options.silent) alert(lockedMonthMessage(month, action));
+    if (!options.noAudit) {
+      addAudit(`ロック月${action}ブロック`, { id: `${collection}:${month}` });
+      persist("ロック月ブロック");
+    }
+    return true;
+  }
+
+  function isLockedDate(date, action = "登録", options = {}) {
+    const month = String(date || "").slice(0, 7);
+    if (!month || !isMonthLocked(month)) return false;
+    if (!options.silent) alert(lockedMonthMessage(month, action));
+    if (!options.noAudit) {
+      addAudit(`ロック月${action}ブロック`, { id: month });
+      persist("ロック月ブロック");
+    }
+    return true;
+  }
+
+  function restoreRecordSnapshot(target, snapshot) {
+    Object.keys(target).forEach((key) => delete target[key]);
+    Object.assign(target, snapshot);
+  }
+
   function lockedMonths() {
     return fiscalMonths(selectedFiscalYear).filter((month) => isMonthLocked(month));
   }
 
+  function lockedRecordMonth(collection, record) {
+    return recordMonths(collection, record).find((month) => isMonthLocked(month)) || "";
+  }
+
+  function hasLockedRecordMonth(collection, record) {
+    return Boolean(lockedRecordMonth(collection, record));
+  }
+
+  function recordMonths(collection, record) {
+    return [...new Set(recordDates(collection, record)
+      .map((date) => String(date || "").slice(0, 7))
+      .filter(Boolean))];
+  }
+
   function recordMonth(collection, record) {
-    const date = recordDate(collection, record);
-    return date ? date.slice(0, 7) : "";
+    return recordMonths(collection, record)[0] || "";
   }
 
   function recordDate(collection, record) {
-    if (!record) return "";
-    if (collection === "invoices") return record.serviceDate || record.issueDate || record.expectedPaymentDate || record.paymentDate || "";
-    if (collection === "receiptDocs") return record.issueDate || record.paymentDate || "";
-    if (collection === "deliveries") return record.date || "";
-    if (collection === "receivedDocs") return record.receivedDate || record.dueDate || "";
-    if (collection === "paymentRequests") return record.requestDate || record.dueDate || "";
-    if (collection === "importBatches") return record.importedAt || "";
-    if (collection === "partners" || collection === "items" || collection === "recurringDocs") return "";
-    if (collection === "payroll") return record.payDate || (record.payMonth ? `${record.payMonth}-01` : "");
-    if (collection === "closings") return record.month ? `${record.month}-01` : "";
-    return record.date || record.issueDate || record.createdAt || "";
+    return recordDates(collection, record)[0] || "";
+  }
+
+  function recordDates(collection, record) {
+    if (!record) return [];
+    if (collection === "invoices") return [record.serviceDate, record.issueDate, record.expectedPaymentDate, record.paymentDate].filter(Boolean);
+    if (collection === "receiptDocs") return [record.issueDate, record.paymentDate].filter(Boolean);
+    if (collection === "deliveries") return [record.date].filter(Boolean);
+    if (collection === "receivedDocs") return [record.receivedDate, record.dueDate].filter(Boolean);
+    if (collection === "paymentRequests") return [record.requestDate, record.dueDate, record.paidAt].filter(Boolean);
+    if (collection === "importBatches") return [record.importedAt].filter(Boolean);
+    if (collection === "partners" || collection === "items" || collection === "recurringDocs") return [];
+    if (collection === "payroll") return [record.payDate, record.payMonth ? `${record.payMonth}-01` : ""].filter(Boolean);
+    if (collection === "closings") return [record.month ? `${record.month}-01` : ""].filter(Boolean);
+    return [record.date, record.issueDate, record.createdAt].filter(Boolean);
   }
 
   function recordSummary(collection, record) {
@@ -2772,7 +2931,7 @@
         <table>
           <thead><tr><th>日付</th><th>科目</th><th>部門</th><th>取引先</th><th>品名</th><th class="num">個数</th><th class="num">単価</th><th class="num">金額</th><th>支払</th><th>税区分</th><th>T番号</th><th>証憑</th><th>申請</th><th>操作</th></tr></thead>
           <tbody>${items.map((item) => `<tr>
-            <td>${esc(formatDate(item.date))}</td><td>${esc(item.category)}</td><td>${esc(item.department || departments()[0])}</td><td>${esc(item.vendor)}</td><td>${esc(item.itemName)}</td>
+            <td>${esc(formatDate(item.date))}</td><td>${esc(item.category)}</td><td>${esc(item.department || departments()[0])}</td><td>${esc(item.vendor)}</td><td>${esc(item.itemName)} ${item.splitGroupId ? '<span class="badge">税率分割</span>' : ""}</td>
             <td class="num">${esc(item.quantity || "")}</td><td class="num">${item.unitPrice ? yen(item.unitPrice) : ""}</td><td class="num">${yen(item.amount)}</td>
             <td>${paymentBadge(item.paymentMethod)}</td><td>${esc(item.taxRate || "")}</td>
             <td>${registrationBadge(item)}</td><td>${item.proof ? '<span class="badge good">有</span>' : '<span class="badge warn">無</span>'}</td><td>${expensePaymentRequestCell(item)}</td><td>${rowActions("expenses", item.id)}</td>
@@ -3100,7 +3259,7 @@
               <div class="receipt-card-body">
                 <div class="receipt-meta"><span>${esc(formatDate(item.date))}</span>${paymentBadge(item.paymentMethod)}</div>
                 <strong>${esc(item.vendor || item.itemName || "未入力")}</strong>
-                <div class="receipt-meta"><span>${esc(item.category)}</span><strong>${yen(item.amount)}</strong></div>
+                <div class="receipt-meta"><span>${esc(item.category)}${item.splitGroupId ? " / 税率分割" : ""}</span><strong>${yen(item.amount)}</strong></div>
                 <div class="actions">${rowActions("expenses", item.id)}</div>
               </div>
             </article>
@@ -3295,7 +3454,7 @@
         const id = button.dataset.id;
         const item = (state[collection] || []).find((record) => record.id === id);
         if (!item) return;
-        if (isMonthLocked(recordMonth(collection, item))) {
+        if (hasLockedRecordMonth(collection, item)) {
           alert("この月は月末締めが完了しているため、削除できません。締め状態を確認してください。");
           return;
         }
@@ -3506,7 +3665,8 @@
     bindLineEditor("editRecordForm");
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
-      await updateRecordFromEdit(collection, id, form);
+      const saved = await updateRecordFromEdit(collection, id, form);
+      if (!saved) return;
       dialog.close();
       persist("編集保存");
       render();
@@ -3745,7 +3905,8 @@
 
   async function updateRecordFromEdit(collection, id, form) {
     const item = (state[collection] || []).find((record) => record.id === id);
-    if (!item) return;
+    if (!item) return false;
+    const before = JSON.parse(JSON.stringify(item));
     const data = formValues(form);
     const formData = new FormData(form);
     const numericFields = ["quantity", "unitPrice", "amount", "mileage", "fuelClaim", "lodging", "total", "basePay", "allowance", "deduction", "netPay", "dayOfMonth"];
@@ -3776,6 +3937,10 @@
     }
     if (collection === "trips" && !num(item.total)) item.total = num(item.fuelClaim) + num(item.lodging);
     if (collection === "payroll" && !num(item.netPay)) item.netPay = num(item.basePay) + num(item.allowance) - num(item.deduction);
+    if (isLockedRecordMonth(collection, item, "編集")) {
+      restoreRecordSnapshot(item, before);
+      return false;
+    }
     if (collection === "sales") markInvoicePaidFromSale(item);
     if (collection === "invoices" && item.paymentDate) item.status = "入金済";
     if (collection === "paymentRequests") {
@@ -3801,6 +3966,7 @@
     }
     item.updatedAt = new Date().toISOString();
     addAudit(`${collection}編集`, item);
+    return true;
   }
 
   function exportAllData() {
@@ -4151,6 +4317,7 @@
       alert("この見積月は月末締めが完了しているため、納品書化できません。締め状態を確認してください。");
       return;
     }
+    if (isLockedDate(TODAY, "納品書化")) return;
     const now = new Date().toISOString();
     const deliveryNo = nextDeliveryNo();
     const lines = cloneDocumentLines(estimate);
@@ -4192,6 +4359,7 @@
       alert("この見積月は月末締めが完了しているため、請求書化できません。締め状態を確認してください。");
       return;
     }
+    if (isLockedDate(TODAY, "請求書化")) return;
     const now = new Date().toISOString();
     const invoiceNo = nextInvoiceNo();
     const lines = cloneDocumentLines(estimate);
@@ -4238,6 +4406,7 @@
       alert("この納品月は月末締めが完了しているため、請求書化できません。締め状態を確認してください。");
       return;
     }
+    if (isLockedDate(TODAY, "請求書化")) return;
     const now = new Date().toISOString();
     const invoiceNo = nextInvoiceNo();
     const lines = cloneDocumentLines(delivery);
@@ -4284,13 +4453,15 @@
       alert("この請求書番号の領収書はすでに作成されています。");
       return;
     }
+    const receiptDate = invoice.paymentDate || invoice.expectedPaymentDate || TODAY;
+    if (isLockedDate(receiptDate, "領収書化") || isLockedDate(TODAY, "領収書化")) return;
     const now = new Date().toISOString();
     const receiptNo = nextReceiptNo();
     const lines = cloneDocumentLines(invoice);
     const receiptDoc = receiptDocRecordFromData({
       receiptNo,
       issueDate: TODAY,
-      paymentDate: invoice.paymentDate || invoice.expectedPaymentDate || TODAY,
+      paymentDate: receiptDate,
       customer: invoice.customer,
       invoiceNo: invoice.invoiceNo,
       content: invoice.content || "お品代",
@@ -4831,6 +5002,7 @@
       return;
     }
     const scheduledDate = dateInMonth(month, template.dayOfMonth || 15);
+    if (isLockedDate(scheduledDate, "毎月自動作成")) return;
     const recurringLines = [normalizeLine({
       itemName: template.content,
       quantity: 1,
@@ -5060,6 +5232,7 @@
       const rows = csvObjects(await file.text());
       let count = 0;
       let amountTotal = 0;
+      let skippedLocked = 0;
       rows.forEach((row) => {
         const date = normalizeDateText(pick(row, ["入金日", "取引日", "日付", "年月日", "date"]));
         const amount = positiveAmount(pick(row, ["入金額", "金額", "取引金額", "amount"]));
@@ -5067,7 +5240,7 @@
         const invoiceNo = pick(row, ["請求書番号", "請求番号", "invoiceNo", "invoice"]);
         const customer = pick(row, ["取引先", "振込依頼人", "摘要", "内容", "name"]);
         const content = pick(row, ["内容", "摘要", "取引内容", "メモ", "description"]) || "通帳CSV取込";
-        state.sales.push({
+        const record = {
           id: uid("sale"),
           date,
           customer,
@@ -5079,11 +5252,17 @@
           bankAccount: pick(row, ["通帳", "銀行", "口座"]) || state.settings.bankAccount || "道銀",
           note: `CSV取込: ${file.name}`,
           createdAt: new Date().toISOString()
-        });
-        markInvoicePaidFromSale(state.sales[state.sales.length - 1]);
+        };
+        if (isLockedRecordMonth("sales", record, "CSV取込", { silent: true, noAudit: true })) {
+          skippedLocked += 1;
+          return;
+        }
+        state.sales.push(record);
+        markInvoicePaidFromSale(record);
         count += 1;
         amountTotal += amount;
       });
+      if (skippedLocked) addAudit("ロック月CSV取込スキップ", { id: `${file.name} 売上 ${skippedLocked}件` });
       recordImportBatch({
         sourceType: "bank",
         target: "sales",
@@ -5091,12 +5270,12 @@
         rowCount: rows.length,
         createdCount: count,
         amountTotal,
-        status: "取込済",
-        note: "通帳CSVから売上一覧へ登録"
+        status: skippedLocked ? "一部取込" : "取込済",
+        note: `通帳CSVから売上一覧へ登録${skippedLocked ? ` / ロック済み月スキップ ${skippedLocked}件` : ""}`
       });
       addAudit("通帳CSV取込", { id: `${file.name} ${count}件` });
       persist("CSV取込");
-      alert(`${count}件の売上入金を取り込みました。`);
+      alert(`${count}件の売上入金を取り込みました。${skippedLocked ? ` ロック済み月は${skippedLocked}件スキップしました。` : ""}`);
       if (activeView === "dataLink") renderDataLink();
       else renderSales();
     } catch (error) {
@@ -5114,11 +5293,12 @@
       const rows = csvObjects(await file.text());
       let count = 0;
       let amountTotal = 0;
+      let skippedLocked = 0;
       rows.forEach((row) => {
         const date = normalizeDateText(pick(row, ["利用日", "取引日", "日付", "年月日", "date"]));
         const amount = positiveAmount(pick(row, ["利用金額", "金額", "取引金額", "amount"]));
         if (!date || !amount) return;
-        state.expenses.push({
+        const record = {
           id: uid("exp"),
           date,
           vendor: pick(row, ["利用店名", "加盟店", "取引先", "摘要", "内容", "name"]),
@@ -5135,10 +5315,16 @@
           note: `カードCSV取込: ${file.name}`,
           proof: null,
           createdAt: new Date().toISOString()
-        });
+        };
+        if (isLockedRecordMonth("expenses", record, "CSV取込", { silent: true, noAudit: true })) {
+          skippedLocked += 1;
+          return;
+        }
+        state.expenses.push(record);
         count += 1;
         amountTotal += amount;
       });
+      if (skippedLocked) addAudit("ロック月CSV取込スキップ", { id: `${file.name} カード ${skippedLocked}件` });
       recordImportBatch({
         sourceType: "card",
         target: "expenses",
@@ -5146,12 +5332,12 @@
         rowCount: rows.length,
         createdCount: count,
         amountTotal,
-        status: "取込済",
-        note: "カードCSVからカード支払の経費へ登録"
+        status: skippedLocked ? "一部取込" : "取込済",
+        note: `カードCSVからカード支払の経費へ登録${skippedLocked ? ` / ロック済み月スキップ ${skippedLocked}件` : ""}`
       });
       addAudit("カードCSV取込", { id: `${file.name} ${count}件` });
       persist("CSV取込");
-      alert(`${count}件のカード経費を取り込みました。`);
+      alert(`${count}件のカード経費を取り込みました。${skippedLocked ? ` ロック済み月は${skippedLocked}件スキップしました。` : ""}`);
       if (activeView === "dataLink") renderDataLink();
       else renderCards();
     } catch (error) {
@@ -5632,7 +5818,7 @@
 
   function rowActions(collection, id) {
     const item = (state[collection] || []).find((record) => record.id === id);
-    const locked = item && isMonthLocked(recordMonth(collection, item));
+    const locked = item && hasLockedRecordMonth(collection, item);
     return `<div class="actions"><button class="button small secondary" data-action="detail" data-collection="${esc(collection)}" data-id="${esc(id)}" type="button">詳細</button>${locked ? '<span class="badge warn">ロック中</span>' : `<button class="button small secondary" data-action="edit" data-collection="${esc(collection)}" data-id="${esc(id)}" type="button">編集</button><button class="button small danger" data-action="delete" data-collection="${esc(collection)}" data-id="${esc(id)}" type="button">削除</button>`}</div>`;
   }
 
@@ -6051,6 +6237,7 @@
       quantity: "個数",
       unitPrice: "単価",
       amount: "金額",
+      splitGroupId: "税率分割ID",
       paymentMethod: "支払区分",
       paymentRequestNo: "支払依頼番号",
       paymentRequestStatus: "支払依頼状態",
