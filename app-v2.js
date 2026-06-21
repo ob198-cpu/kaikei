@@ -629,7 +629,8 @@
     const proofFile = data.get("proof");
     const proof = proofFile && proofFile.size ? await readFile(proofFile) : null;
     const paymentMethod = detectPayment(`${data.get("note") || ""} ${proofFile && proofFile.name ? proofFile.name : ""}`) || clean(data.get("paymentMethod")) || "cash";
-    const splitMode = event.submitter && event.submitter.dataset.submitMode === "tax-split";
+    const hasSplitAmounts = num(data.get("split10Amount")) > 0 || num(data.get("split8Amount")) > 0;
+    const splitMode = (event.submitter && event.submitter.dataset.submitMode === "tax-split") || hasSplitAmounts;
     if (splitMode) {
       const records = buildTaxSplitExpenseRecords(data, { paymentMethod, proof });
       if (!records.length) {
@@ -3516,6 +3517,10 @@
       input.addEventListener("change", (event) => attachSplitProof(event.currentTarget));
     });
 
+    app.querySelectorAll("[data-action='expense-tax-split']").forEach((button) => {
+      button.addEventListener("click", () => splitExistingExpense(button.dataset.id));
+    });
+
     app.querySelectorAll("[data-action='send-draft']").forEach((button) => {
       button.addEventListener("click", () => showSendDraft(button.dataset.collection, button.dataset.id));
     });
@@ -5840,7 +5845,10 @@
   function rowActions(collection, id) {
     const item = (state[collection] || []).find((record) => record.id === id);
     const locked = item && hasLockedRecordMonth(collection, item);
-    return `<div class="actions"><button class="button small secondary" data-action="detail" data-collection="${esc(collection)}" data-id="${esc(id)}" type="button">詳細</button>${locked ? '<span class="badge warn">ロック中</span>' : `<button class="button small secondary" data-action="edit" data-collection="${esc(collection)}" data-id="${esc(id)}" type="button">編集</button><button class="button small danger" data-action="delete" data-collection="${esc(collection)}" data-id="${esc(id)}" type="button">削除</button>`}</div>`;
+    const splitAction = collection === "expenses" && item && !item.splitGroupId
+      ? `<button class="button small secondary" data-action="expense-tax-split" data-id="${esc(id)}" type="button">税率分割</button>`
+      : "";
+    return `<div class="actions"><button class="button small secondary" data-action="detail" data-collection="${esc(collection)}" data-id="${esc(id)}" type="button">詳細</button>${locked ? '<span class="badge warn">ロック中</span>' : `${splitAction}<button class="button small secondary" data-action="edit" data-collection="${esc(collection)}" data-id="${esc(id)}" type="button">編集</button><button class="button small danger" data-action="delete" data-collection="${esc(collection)}" data-id="${esc(id)}" type="button">削除</button>`}</div>`;
   }
 
   function paymentBadge(value) {
@@ -5881,6 +5889,64 @@
       alert("証憑画像/PDFを読み込めませんでした。");
       input.value = "";
     }
+  }
+
+  function splitExistingExpense(id) {
+    const index = state.expenses.findIndex((item) => item.id === id);
+    const expense = state.expenses[index];
+    if (!expense) return;
+    if (expense.splitGroupId) {
+      alert("この経費はすでに税率別に分割されています。");
+      return;
+    }
+    if (isLockedRecordMonth("expenses", expense, "税率分割")) return;
+
+    const defaults = defaultExpenseSplitAmounts(expense);
+    const amount10 = num(prompt("10%対象額を入力してください。", defaults.amount10 ? String(defaults.amount10) : ""));
+    if (!amount10) return;
+    const amount8 = num(prompt("8%対象額を入力してください。", defaults.amount8 ? String(defaults.amount8) : ""));
+    if (!amount8) return;
+
+    const total = amount10 + amount8;
+    if (num(expense.amount) && total !== num(expense.amount)) {
+      const ok = confirm(`分割合計 ${yen(total)} が元の金額 ${yen(expense.amount)} と一致しません。このまま分割しますか？`);
+      if (!ok) return;
+    }
+
+    const groupId = uid("split");
+    const now = new Date().toISOString();
+    const baseName = clean(expense.itemName) || "レシート購入分";
+    const splitText = `税率別分割 / 元行 ${yen(expense.amount)} / 10% ${yen(amount10)} / 8% ${yen(amount8)}`;
+    const makeRecord = (amount, taxRate, label) => ({
+      ...expense,
+      id: uid("exp"),
+      originalExpenseId: expense.id,
+      splitGroupId: groupId,
+      itemName: `${baseName.replace(/\s+(10%対象|8%対象)$/, "")} ${label}`,
+      quantity: 1,
+      unitPrice: amount,
+      amount,
+      taxRate,
+      note: [expense.note, splitText].filter(Boolean).join(" / "),
+      updatedAt: now
+    });
+
+    const records = [
+      makeRecord(amount10, "10%", "10%対象"),
+      makeRecord(amount8, "8%", "8%対象")
+    ];
+    state.expenses.splice(index, 1, ...records);
+    addAudit("経費を税率分割", { id: expense.id, splitGroupId: groupId, total });
+    persist("税率分割保存");
+    showFiscalYearForDate(records[0].date);
+    render();
+  }
+
+  function defaultExpenseSplitAmounts(expense) {
+    const vendor = clean(expense && expense.vendor);
+    const amount = num(expense && expense.amount);
+    if (vendor.includes("ツルハ") && amount === 22436) return { amount10: 8716, amount8: 13720 };
+    return { amount10: amount, amount8: 0 };
   }
 
   function paymentLabel(value) {
