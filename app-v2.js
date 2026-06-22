@@ -34,6 +34,12 @@
   ];
 
   const taxRates = ["10%", "8%", "非課税", "不明"];
+  const expenseEligibilityOptions = [
+    ["auto", "自動判定"],
+    ["eligible", "適格"],
+    ["ineligible", "不適格"]
+  ];
+  const expenseEligibilityEditOptions = expenseEligibilityOptions.filter(([value]) => value !== "auto");
   const invoiceStatuses = ["未入金", "入金予定", "入金済", "保留"];
   const paymentRequestStatuses = ["下書き", "申請中", "差し戻し", "承認済", "支払済"];
   const receivedDocTypes = ["請求書", "領収書", "納品書", "見積書", "契約書", "その他"];
@@ -123,6 +129,7 @@
     seedFiscalOptions();
     bindGlobalEvents();
     applyBundledReceiptMigrations();
+    applyExpenseEligibilityDefaults();
     persist("自動保存");
     render();
   }
@@ -319,6 +326,8 @@
         amount: 8716,
         taxRate: "10%",
         registrationNumber: "T1430001010672",
+        expenseEligibility: "eligible",
+        expenseEligibilityReason: "10%対象分は消耗品として登録。業務用購入分である前提で適格。",
         splitGroupId: "split-157347-tsuruha",
         proof: proof("157347-tsuruha.jpg", "157347_ツルハドラッグ福井店.jpg"),
         note: "157347台紙より登録。領収書の10%対象額。支払区分は台紙のクレジット表記でカード。"
@@ -334,6 +343,8 @@
         amount: 13720,
         taxRate: "8%",
         registrationNumber: "T1430001010672",
+        expenseEligibility: "ineligible",
+        expenseEligibilityReason: "8%対象分は飲食・食品等の可能性があり、業務用途の説明が不足しているため不適格。",
         splitGroupId: "split-157347-tsuruha",
         proof: proof("157347-tsuruha.jpg", "157347_ツルハドラッグ福井店.jpg"),
         note: "157347台紙より登録。領収書の8%対象額。支払区分は台紙のクレジット表記でカード。"
@@ -349,6 +360,8 @@
         amount: 1000,
         taxRate: "10%",
         registrationNumber: "T1370801000359",
+        expenseEligibility: "eligible",
+        expenseEligibilityReason: "車両関連の洗車代として業務利用車両に紐づけられるため適格。",
         proof: proof("157347-cosmo.jpg", "157347_COSMO洗車.jpg"),
         note: "157347台紙より登録。AMEX下4桁1006。車両関連洗車代。"
       },
@@ -364,6 +377,8 @@
         amount: 15138,
         taxRate: "10%",
         registrationNumber: "T4430001015181",
+        expenseEligibility: "ineligible",
+        expenseEligibilityReason: "スーパー購入分で業務用途・利用目的が未記載のため不適格。業務用であれば理由を追記して変更。",
         proof: proof("157347-lucky.jpg", "157347_LUCKY篠路店.jpg"),
         note: "157347台紙より登録。クレジット。用途は税理士確認推奨。"
       },
@@ -378,6 +393,8 @@
         amount: 1000,
         taxRate: "10%",
         registrationNumber: "T7430001079728",
+        expenseEligibility: "eligible",
+        expenseEligibilityReason: "移動時の駐車料金として業務移動に紐づけられるため適格。",
         proof: proof("157347-parking.jpg", "157347_新千歳空港A駐車場.jpg"),
         note: "157347台紙より登録。JCBカード。駐車時間1時間17分。"
       },
@@ -392,10 +409,66 @@
         amount: 67155,
         taxRate: "10%",
         registrationNumber: "T8430001067178",
+        expenseEligibility: "ineligible",
+        expenseEligibilityReason: "飲食代は相手先・人数・目的が未記載のため不適格。接待交際費なら内容を追記して変更。",
         proof: proof("157347-shinshin.jpg", "157347_芯々飲食代.jpg"),
         note: "157347台紙より登録。「ご飲食代として」。日付と支払区分は台紙情報から登録。"
       }
     ];
+  }
+
+  function applyExpenseEligibilityDefaults() {
+    state.expenses = Array.isArray(state.expenses) ? state.expenses : [];
+    let changedCount = 0;
+    state.expenses.forEach((item) => {
+      const normalized = normalizeExpenseEligibility(item.expenseEligibility);
+      if (normalized) {
+        item.expenseEligibility = normalized;
+        if (!clean(item.expenseEligibilityReason)) {
+          item.expenseEligibilityReason = inferExpenseEligibility(item).reason;
+          changedCount += 1;
+        }
+        return;
+      }
+      applyExpenseEligibility(item);
+      changedCount += 1;
+    });
+    if (changedCount) addAudit("経費適格判定初期設定", { count: changedCount });
+  }
+
+  function applyExpenseEligibility(record, selectedValue, reason) {
+    const selected = normalizeExpenseEligibility(selectedValue);
+    const inferred = inferExpenseEligibility(record);
+    record.expenseEligibility = selected || inferred.value;
+    record.expenseEligibilityReason = clean(reason) || record.expenseEligibilityReason || inferred.reason;
+    return record;
+  }
+
+  function inferExpenseEligibility(item = {}) {
+    const preset = {
+      "exp-157347-tsuruha-10": ["eligible", "10%対象分は消耗品として登録。業務用購入分である前提で適格。"],
+      "exp-157347-tsuruha-8": ["ineligible", "8%対象分は飲食・食品等の可能性があり、業務用途の説明が不足しているため不適格。"],
+      "exp-157347-cosmo": ["eligible", "車両関連の洗車代として業務利用車両に紐づけられるため適格。"],
+      "exp-157347-lucky": ["ineligible", "スーパー購入分で業務用途・利用目的が未記載のため不適格。"],
+      "exp-157347-airport-parking": ["eligible", "移動時の駐車料金として業務移動に紐づけられるため適格。"],
+      "exp-157347-shinshin": ["ineligible", "飲食代は相手先・人数・目的が未記載のため不適格。"]
+    };
+    if (preset[item.id]) return { value: preset[item.id][0], reason: preset[item.id][1] };
+
+    const text = [item.vendor, item.category, item.itemName, item.note].filter(Boolean).join(" ");
+    if (/ツルハ/.test(text) && item.taxRate === "8%") {
+      return { value: "ineligible", reason: "ツルハの8%対象分は飲食・食品等の可能性があり、業務用途の説明が不足しているため不適格。" };
+    }
+    if (/ツルハ/.test(text) && item.taxRate === "10%") {
+      return { value: "eligible", reason: "ツルハの10%対象分は消耗品として登録。業務用購入分である前提で適格。" };
+    }
+    if (/駐車|ガソリン|燃料|洗車|車両|交通|旅費|出張|宿泊|高速|タクシー|通信|会議|研修|書籍|新聞|消耗品|事務|備品/.test(text)) {
+      return { value: "eligible", reason: "業務に使う内容として説明しやすい科目・品名のため適格。" };
+    }
+    if (/スーパー|飲食|食事|ランチ|居酒屋|レストラン|食品|食料|私用|個人/.test(text)) {
+      return { value: "ineligible", reason: "業務目的・相手先・利用理由の説明が不足しているため不適格。" };
+    }
+    return { value: "ineligible", reason: "業務用途の説明が未入力のため不適格。必要な場合は理由を追記して適格に変更。" };
   }
 
   function persist(action) {
@@ -681,6 +754,8 @@
         otherTaxTotal: sum(records.filter((item) => !["10%", "8%"].includes(item.taxRate)), "amount"),
         proofAttached: records.filter((item) => item.proof).length,
         proofMissing: records.filter((item) => !item.proof).length,
+        eligibleCount: records.filter((item) => expenseEligibilityValue(item) === "eligible").length,
+        ineligibleCount: records.filter((item) => expenseEligibilityValue(item) === "ineligible").length,
         registrationMissing: records.filter((item) => num(item.amount) >= 10000 && item.invoiceEligible && !isValidRegistration(item.registrationNumber)).length,
         mainCategories
       };
@@ -706,6 +781,7 @@
               <th class="num">その他税</th>
               <th>証憑</th>
               <th>T番号不足</th>
+              <th>経費適格</th>
               <th>主な科目</th>
             </tr>
           </thead>
@@ -723,6 +799,7 @@
               <td class="num">${yen(row.otherTaxTotal)}</td>
               <td>${row.count ? `${row.proofAttached}/${row.count}件${row.proofMissing ? ` <span class="badge warn">不足${row.proofMissing}</span>` : ` <span class="badge good">OK</span>`}` : "-"}</td>
               <td>${row.registrationMissing ? `<span class="badge bad">${row.registrationMissing}件</span>` : "-"}</td>
+              <td>${row.count ? `${row.eligibleCount}/${row.count}件${row.ineligibleCount ? ` <span class="badge bad">不適格${row.ineligibleCount}</span>` : ` <span class="badge good">OK</span>`}` : "-"}</td>
               <td>${esc(row.mainCategories || "-")}</td>
             </tr>`).join("")}
           </tbody>
@@ -740,6 +817,7 @@
               <th class="num">${yen(sum(rows, "otherTaxTotal"))}</th>
               <th>${sum(rows, "proofAttached")}/${sum(rows, "count")}件</th>
               <th>${sum(rows, "registrationMissing")}件</th>
+              <th>${sum(rows, "eligibleCount")}/${sum(rows, "count")}件</th>
               <th>${nonEmptyCount}か月分</th>
             </tr>
           </tfoot>
@@ -763,6 +841,8 @@
       ["proofAttached", "証憑あり"],
       ["proofMissing", "証憑不足"],
       ["registrationMissing", "T番号不足"],
+      ["eligibleCount", "経費適格"],
+      ["ineligibleCount", "経費不適格"],
       ["mainCategories", "主な科目"]
     ];
   }
@@ -818,7 +898,7 @@
     document.getElementById("exportExpensesCsv").addEventListener("click", () => exportCsv("expenses", expenses, [
       ["date", "日付"], ["category", "経費科目"], ["department", "部門"], ["vendor", "取引先"], ["itemName", "品名"],
       ["quantity", "個数"], ["unitPrice", "単価"], ["amount", "金額"], ["paymentMethod", "支払区分"],
-      ["paymentRequestNo", "支払依頼番号"], ["paymentRequestStatus", "支払依頼状態"], ["taxRate", "税区分"], ["registrationNumber", "T番号"], ["invoiceEligible", "インボイス適格"], ["splitGroupId", "税率分割ID"], ["note", "摘要"]
+      ["paymentRequestNo", "支払依頼番号"], ["paymentRequestStatus", "支払依頼状態"], ["taxRate", "税区分"], ["registrationNumber", "T番号"], ["invoiceEligible", "インボイス適格"], ["expenseEligibility", "経費適格"], ["expenseEligibilityReason", "判定理由"], ["splitGroupId", "税率分割ID"], ["note", "摘要"]
     ]));
     bindFilterControls("expenses");
     bindTableActions();
@@ -847,6 +927,8 @@
     form.elements.amount.value = "22436";
     form.elements.taxRate.value = "10%";
     form.elements.registrationNumber.value = "T1430001010672";
+    form.elements.expenseEligibility.value = "auto";
+    form.elements.expenseEligibilityReason.value = "10%対象は消耗品として適格、8%対象は用途未記載のため不適格で自動判定";
     form.elements.split10Amount.value = "8716";
     form.elements.split8Amount.value = "13720";
     form.elements.splitMemo.value = "ツルハ領収書の10%・8%対象額を分割";
@@ -868,6 +950,8 @@
         ${selectField("taxRate", "税区分", taxRates, "10%")}
         ${field("registrationNumber", "T番号", "text", "", "T1234567890123")}
         <label class="check-field"><input name="invoiceEligible" type="checkbox" checked> インボイス適格</label>
+        ${selectField("expenseEligibility", "経費適格", expenseEligibilityOptions, "auto")}
+        ${field("expenseEligibilityReason", "判定理由", "text", "", "例: 業務用の消耗品、出張時の駐車料金")}
         <label class="field"><span>証憑画像/PDF</span><input name="proof" type="file" accept="image/*,application/pdf"></label>
         <label class="field" style="grid-column:1 / -1;">
           <span>摘要・読み取り文字</span>
@@ -940,10 +1024,13 @@
       paymentMethod,
       registrationNumber: normalizeRegistration(data.get("registrationNumber")),
       invoiceEligible: Boolean(data.get("invoiceEligible")),
+      expenseEligibility: "",
+      expenseEligibilityReason: "",
       note: clean(data.get("note")),
       proof,
       createdAt: new Date().toISOString()
     };
+    applyExpenseEligibility(record, data.get("expenseEligibility"), data.get("expenseEligibilityReason"));
     if (isLockedRecordMonth("expenses", record, "登録")) return;
     state.expenses.push(record);
     addAudit("経費登録", record);
@@ -967,25 +1054,28 @@
     const groupId = uid("split");
     const createdAt = new Date().toISOString();
 
-    return splitRows.map((row) => ({
-      id: uid("exp"),
-      splitGroupId: groupId,
-      date: clean(data.get("date")) || TODAY,
-      vendor: clean(data.get("vendor")),
-      category: clean(data.get("category")) || "未分類",
-      department: clean(data.get("department")) || departments()[0],
-      itemName: `${baseItemName} ${row.label}`,
-      quantity: 1,
-      unitPrice: row.amount,
-      amount: row.amount,
-      taxRate: row.taxRate,
-      paymentMethod: options.paymentMethod || clean(data.get("paymentMethod")) || "cash",
-      registrationNumber: normalizeRegistration(data.get("registrationNumber")),
-      invoiceEligible: Boolean(data.get("invoiceEligible")),
-      note: [baseNote, splitMemo, splitText].filter(Boolean).join(" / "),
-      proof: options.proof || null,
-      createdAt
-    }));
+    return splitRows.map((row) => {
+      const record = {
+        id: uid("exp"),
+        splitGroupId: groupId,
+        date: clean(data.get("date")) || TODAY,
+        vendor: clean(data.get("vendor")),
+        category: clean(data.get("category")) || "未分類",
+        department: clean(data.get("department")) || departments()[0],
+        itemName: `${baseItemName} ${row.label}`,
+        quantity: 1,
+        unitPrice: row.amount,
+        amount: row.amount,
+        taxRate: row.taxRate,
+        paymentMethod: options.paymentMethod || clean(data.get("paymentMethod")) || "cash",
+        registrationNumber: normalizeRegistration(data.get("registrationNumber")),
+        invoiceEligible: Boolean(data.get("invoiceEligible")),
+        note: [baseNote, splitMemo, splitText].filter(Boolean).join(" / "),
+        proof: options.proof || null,
+        createdAt
+      };
+      return applyExpenseEligibility(record, data.get("expenseEligibility"), data.get("expenseEligibilityReason"));
+    });
   }
 
   function renderReceivedDocs() {
@@ -2264,7 +2354,7 @@
     document.getElementById("importCardCsvInput").addEventListener("change", importCardCsv);
     document.getElementById("exportCardCsv").addEventListener("click", () => exportCsv("card-ledger", cardExpenses, [
       ["date", "日付"], ["vendor", "取引先"], ["category", "経費科目"], ["department", "部門"], ["itemName", "品名"],
-      ["amount", "金額"], ["taxRate", "税区分"], ["registrationNumber", "T番号"], ["invoiceEligible", "インボイス適格"], ["splitGroupId", "税率分割ID"], ["note", "摘要"]
+      ["amount", "金額"], ["taxRate", "税区分"], ["registrationNumber", "T番号"], ["invoiceEligible", "インボイス適格"], ["expenseEligibility", "経費適格"], ["expenseEligibilityReason", "判定理由"], ["splitGroupId", "税率分割ID"], ["note", "摘要"]
     ]));
     bindMonthlyHandoffActions();
     bindTableActions();
@@ -3160,7 +3250,7 @@
       if (filter.paymentMethod !== "all" && item.paymentMethod !== filter.paymentMethod) return false;
       if (filter.proof === "missing" && item.proof) return false;
       if (filter.proof === "attached" && !item.proof) return false;
-      return matchesQuery(item, filter.query, ["date", "vendor", "category", "department", "itemName", "amount", "paymentMethod", "registrationNumber", "note"]);
+      return matchesQuery(item, filter.query, ["date", "vendor", "category", "department", "itemName", "amount", "paymentMethod", "registrationNumber", "expenseEligibility", "expenseEligibilityReason", "note"]);
     });
   }
 
@@ -3224,11 +3314,11 @@
     return `
       <div class="table-wrap">
         <table>
-          <thead><tr><th>日付</th><th>科目</th><th>部門</th><th>取引先</th><th>品名</th><th class="num">個数</th><th class="num">単価</th><th class="num">金額</th><th>支払</th><th>税区分</th><th>T番号</th><th>証憑</th><th>申請</th><th>操作</th></tr></thead>
+          <thead><tr><th>日付</th><th>科目</th><th>部門</th><th>取引先</th><th>品名</th><th class="num">個数</th><th class="num">単価</th><th class="num">金額</th><th>支払</th><th>経費適格</th><th>税区分</th><th>T番号</th><th>証憑</th><th>申請</th><th>操作</th></tr></thead>
           <tbody>${items.map((item) => `<tr>
             <td>${esc(formatDate(item.date))}</td><td>${esc(item.category)}</td><td>${esc(item.department || departments()[0])}</td><td>${esc(item.vendor)}</td><td>${esc(item.itemName)} ${item.splitGroupId ? '<span class="badge">税率分割</span>' : ""}</td>
             <td class="num">${esc(item.quantity || "")}</td><td class="num">${item.unitPrice ? yen(item.unitPrice) : ""}</td><td class="num">${yen(item.amount)}</td>
-            <td>${paymentBadge(item.paymentMethod)}</td><td>${esc(item.taxRate || "")}</td>
+            <td>${paymentBadge(item.paymentMethod)}</td><td>${expenseEligibilityBadge(item)}</td><td>${esc(item.taxRate || "")}</td>
             <td>${registrationBadge(item)}</td><td>${item.proof ? '<span class="badge good">有</span>' : '<span class="badge warn">無</span>'}</td><td>${expensePaymentRequestCell(item)}</td><td>${rowActions("expenses", item.id)}</td>
           </tr>`).join("")}</tbody>
         </table>
@@ -3607,6 +3697,7 @@
               <th>税区分</th>
               <th>T番号</th>
               <th>支払</th>
+              <th>経費適格</th>
               <th class="num">金額</th>
               <th>メモ</th>
               <th>操作</th>
@@ -3624,6 +3715,7 @@
               <td>${esc(item.taxRate || "")} ${item.splitGroupId ? '<span class="badge warn">税率分割</span>' : ""}</td>
               <td>${registrationBadge(item) || "-"}</td>
               <td>${paymentBadge(item.paymentMethod)}</td>
+              <td>${expenseEligibilityBadge(item)}</td>
               <td class="num"><strong>${yen(item.amount)}</strong></td>
               <td class="receipt-note-cell">${esc(item.note || "")}</td>
               <td><div class="actions">${splitProofAction(item)}${rowActions("expenses", item.id)}</div></td>
@@ -4080,6 +4172,8 @@
         ${selectField("taxRate", "税区分", taxRates, item.taxRate || "10%")}
         ${field("registrationNumber", "T番号", "text", item.registrationNumber || "")}
         <label class="check-field"><input name="invoiceEligible" type="checkbox" ${item.invoiceEligible ? "checked" : ""}> インボイス適格</label>
+        ${selectField("expenseEligibility", "経費適格", expenseEligibilityEditOptions, expenseEligibilityValue(item))}
+        ${field("expenseEligibilityReason", "判定理由", "text", item.expenseEligibilityReason || inferExpenseEligibility(item).reason)}
         <label class="field"><span>証憑差し替え</span><input name="proof" type="file" accept="image/*,application/pdf"></label>
         <div class="notice info" style="grid-column:1 / -1;">証憑を選ばない場合、現在の証憑をそのまま残します。</div>
         <label class="field" style="grid-column:1 / -1;"><span>摘要</span><textarea name="note">${esc(item.note || "")}</textarea></label>
@@ -4310,6 +4404,8 @@
     if (collection === "expenses") {
       item.invoiceEligible = Boolean(formData.get("invoiceEligible"));
       item.registrationNumber = normalizeRegistration(item.registrationNumber);
+      item.expenseEligibility = normalizeExpenseEligibility(item.expenseEligibility) || inferExpenseEligibility(item).value;
+      if (!clean(item.expenseEligibilityReason)) item.expenseEligibilityReason = inferExpenseEligibility(item).reason;
       const quantity = num(item.quantity) || 1;
       const unitPrice = num(item.unitPrice);
       if (!num(item.amount) && unitPrice) item.amount = Math.round(quantity * unitPrice);
@@ -4515,6 +4611,7 @@
   function monthlyHandoffIssues(data) {
     const issues = [];
     const missingProof = data.expenses.filter((item) => !item.proof);
+    const ineligibleExpenses = data.expenses.filter((item) => expenseEligibilityValue(item) === "ineligible");
     const unconfirmedReceivedDocs = (data.receivedDocs || []).filter((item) => item.status === "未確認");
     const receivedDocsWithoutFile = (data.receivedDocs || []).filter((item) => !item.file);
     const missingRegistration = data.expenses.filter((item) => num(item.amount) >= 10000 && item.invoiceEligible && !isValidRegistration(item.registrationNumber));
@@ -4527,6 +4624,7 @@
     if (!midClosed) issues.push({ severity: "warn", title: "15日前後の締め未完了", body: "中間締めの確認状況を残してください。" });
     if (!monthClosed) issues.push({ severity: "warn", title: "月末締め未完了", body: "月末締めが完了していない月です。" });
     if (missingProof.length) issues.push({ severity: "warn", title: "証憑未添付", body: `${missingProof.length}件あります。画像/PDFを確認してください。` });
+    if (ineligibleExpenses.length) issues.push({ severity: "bad", title: "経費不適格候補", body: `${ineligibleExpenses.length}件あります。税理士提出前に業務用途・相手先・目的を確認してください。` });
     if (unconfirmedReceivedDocs.length) issues.push({ severity: "warn", title: "未確認の受領書類", body: `${unconfirmedReceivedDocs.length}件あります。請求書・領収書の内容確認を残してください。` });
     if (receivedDocsWithoutFile.length) issues.push({ severity: "warn", title: "受領書類ファイル未添付", body: `${receivedDocsWithoutFile.length}件あります。画像/PDFを保管してください。` });
     if (missingRegistration.length) issues.push({ severity: "bad", title: "T番号要確認", body: `${missingRegistration.length}件あります。1万円以上・適格のものは担当税理士に確認が必要。` });
@@ -4599,10 +4697,10 @@
   ${(data.receivedDocs || []).length ? `<table><thead><tr><th>受領日</th><th>種別</th><th>発行元</th><th>件名</th><th>状態</th><th>支払依頼</th><th class="num">金額</th></tr></thead><tbody>${data.receivedDocs.map((item) => `<tr><td>${esc(formatDate(item.receivedDate))}</td><td>${esc(item.documentType || "")}</td><td>${esc(item.vendor || "")}</td><td>${esc(item.title || "")}</td><td>${esc(item.status || "")}</td><td>${esc(item.paymentRequestNo || "")}</td><td class="num">${esc(yen(item.amount))}</td></tr>`).join("")}</tbody></table>` : `<p class="muted">この月の受領書類はありません。</p>`}
 
   <h2>経費・証憑</h2>
-  ${data.expenses.length ? `<table><thead><tr><th>日付</th><th>支払</th><th>取引先/品名</th><th>科目</th><th class="num">金額</th><th>T番号</th><th>証憑</th></tr></thead><tbody>${data.expenses.map((item) => `
+  ${data.expenses.length ? `<table><thead><tr><th>日付</th><th>支払</th><th>取引先/品名</th><th>科目</th><th>経費適格</th><th class="num">金額</th><th>T番号</th><th>証憑</th></tr></thead><tbody>${data.expenses.map((item) => `
     <tr>
       <td>${esc(formatDate(item.date))}</td><td>${esc(paymentLabel(item.paymentMethod))}</td><td>${esc([item.vendor, item.itemName].filter(Boolean).join(" / "))}</td>
-      <td>${esc(item.category || "")}</td><td class="num">${esc(yen(item.amount))}</td><td>${esc(item.registrationNumber || "")}</td><td>${handoffProofCell(item)}</td>
+      <td>${esc(item.category || "")}</td><td class="${expenseEligibilityValue(item) === "ineligible" ? "bad" : "good"}">${esc(expenseEligibilityLabel(item.expenseEligibility))}</td><td class="num">${esc(yen(item.amount))}</td><td>${esc(item.registrationNumber || "")}</td><td>${handoffProofCell(item)}</td>
     </tr>`).join("")}</tbody></table>` : `<p class="muted">この月の経費はありません。</p>`}
 
   <h2>売上入金</h2>
@@ -5739,10 +5837,13 @@
           paymentMethod: "card",
           registrationNumber: normalizeRegistration(pick(row, ["T番号", "登録番号"])),
           invoiceEligible: true,
+          expenseEligibility: "",
+          expenseEligibilityReason: "",
           note: `カードCSV取込: ${file.name}`,
           proof: null,
           createdAt: new Date().toISOString()
         };
+        applyExpenseEligibility(record);
         if (isLockedRecordMonth("expenses", record, "CSV取込", { silent: true, noAudit: true })) {
           skippedLocked += 1;
           return;
@@ -6407,6 +6508,27 @@
     return `<span class="badge ${cls}">${esc(text)}</span>`;
   }
 
+  function normalizeExpenseEligibility(value) {
+    if (value === true || value === "true" || value === "eligible" || value === "適格") return "eligible";
+    if (value === false || value === "false" || value === "ineligible" || value === "不適格") return "ineligible";
+    return "";
+  }
+
+  function expenseEligibilityValue(item) {
+    return normalizeExpenseEligibility(item && item.expenseEligibility) || inferExpenseEligibility(item || {}).value;
+  }
+
+  function expenseEligibilityLabel(value) {
+    return normalizeExpenseEligibility(value) === "ineligible" ? "不適格" : "適格";
+  }
+
+  function expenseEligibilityBadge(item) {
+    const value = expenseEligibilityValue(item);
+    const label = value === "ineligible" ? "不適格" : "適格";
+    const cls = value === "ineligible" ? "bad" : "good";
+    return `<span class="badge ${cls}">${label}</span>`;
+  }
+
   function registrationBadge(item) {
     if (item.registrationNumber && isValidRegistration(item.registrationNumber)) return esc(item.registrationNumber);
     if (item.registrationNumber) return `<span class="badge bad">${esc(item.registrationNumber)}</span>`;
@@ -6743,6 +6865,7 @@
     if (key.toLowerCase().includes("date") || key === "createdAt" || key === "deletedAt" || key === "at") return String(value).includes("T") ? formatDateTime(value) : formatDate(value);
     if (["amount", "amountTotal", "unitPrice", "fuelClaim", "lodging", "total", "basePay", "allowance", "deduction", "netPay", "debit", "credit", "balance", "previous", "current", "diff"].includes(key)) return yen(value);
     if (key === "paymentMethod") return paymentLabel(value);
+    if (key === "expenseEligibility") return expenseEligibilityLabel(value);
     if (key === "sourceType") return value === "bank" ? "通帳" : value === "card" ? "カード" : String(value);
     if (key === "target") return importTargetLabel(value);
     if (typeof value === "boolean") return value ? "はい" : "いいえ";
@@ -6777,6 +6900,8 @@
       taxRate: "税区分",
       registrationNumber: "T番号",
       invoiceEligible: "インボイス適格",
+      expenseEligibility: "経費適格",
+      expenseEligibilityReason: "判定理由",
       note: "メモ",
       invoiceNo: "請求書番号",
       requestNo: "申請番号",
