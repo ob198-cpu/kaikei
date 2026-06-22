@@ -3539,6 +3539,7 @@
 
   function renderReceiptMonth(month, records) {
     const sorted = [...records].sort(byDate("date"));
+    const groups = receiptSourceGroups(sorted);
     return `
       <div class="receipt-month" style="margin-bottom:14px;">
         <div class="receipt-month-head">
@@ -3546,45 +3547,89 @@
           <div class="actions"><span class="badge">${sorted.length}件</span><span class="badge">${yen(sum(sorted, "amount"))}</span><button class="button secondary small" data-action="month-handoff" data-month="${esc(month)}" type="button">提出HTML</button></div>
         </div>
         <div class="receipt-month-table">
-          <div class="table-wrap receipt-detail-table">
-            <table>
-              <thead>
-                <tr>
-                  <th>証憑</th>
-                  <th>日付</th>
-                  <th>取引先</th>
-                  <th>科目</th>
-                  <th>品名</th>
-                  <th class="num">個数</th>
-                  <th class="num">単価</th>
-                  <th>税区分</th>
-                  <th>T番号</th>
-                  <th>支払</th>
-                  <th class="num">金額</th>
-                  <th>メモ</th>
-                  <th>操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${sorted.map((item) => `<tr>
-                  <td>${receiptProofThumb(item)}</td>
-                  <td>${esc(formatDate(item.date))}</td>
-                  <td><strong>${esc(item.vendor || "未入力")}</strong></td>
-                  <td>${esc(item.category || "")}</td>
-                  <td>${esc(item.itemName || "")}</td>
-                  <td class="num">${esc(item.quantity || "")}</td>
-                  <td class="num">${item.unitPrice ? yen(item.unitPrice) : "-"}</td>
-                  <td>${esc(item.taxRate || "")} ${item.splitGroupId ? '<span class="badge warn">税率分割</span>' : ""}</td>
-                  <td>${registrationBadge(item) || "-"}</td>
-                  <td>${paymentBadge(item.paymentMethod)}</td>
-                  <td class="num"><strong>${yen(item.amount)}</strong></td>
-                  <td class="receipt-note-cell">${esc(item.note || "")}</td>
-                  <td><div class="actions">${splitProofAction(item)}${rowActions("expenses", item.id)}</div></td>
-                </tr>`).join("")}
-              </tbody>
-            </table>
+          ${groups.map(renderReceiptSourceGroup).join("")}
+        </div>
+      </div>
+    `;
+  }
+
+  function receiptSourceGroups(records) {
+    const groups = new Map();
+    records.forEach((item, index) => {
+      const proof = item.proof;
+      const sourceUrl = proof && (proof.fullDataUrl || proof.dataUrl) ? (proof.fullDataUrl || proof.dataUrl) : "";
+      const sourceName = proof && (proof.fullName || proof.name) ? (proof.fullName || proof.name) : "証憑なし";
+      const key = sourceUrl || `no-proof-${sourceName}-${index}`;
+      if (!groups.has(key)) groups.set(key, { key, sourceUrl, sourceName, records: [] });
+      groups.get(key).records.push(item);
+    });
+    return [...groups.values()];
+  }
+
+  function renderReceiptSourceGroup(group) {
+    const hasSource = Boolean(group.sourceUrl);
+    return `
+      <section class="receipt-source-group">
+        <div class="receipt-source-head">
+          ${hasSource ? `
+            <a class="receipt-source-photo" href="${esc(group.sourceUrl)}" target="_blank" rel="noopener" aria-label="元写真を拡大">
+              <img src="${esc(group.sourceUrl)}" alt="${esc(group.sourceName)}">
+            </a>
+          ` : `<div class="receipt-source-photo is-empty">元写真なし</div>`}
+          <div class="receipt-source-meta">
+            <strong>元写真グループ</strong>
+            <span>${esc(group.sourceName)}</span>
+            <div class="actions">
+              <span class="badge">${group.records.length}件</span>
+              <span class="badge">${yen(sum(group.records, "amount"))}</span>
+              ${hasSource ? `<a class="button secondary small" href="${esc(group.sourceUrl)}" target="_blank" rel="noopener">元写真を拡大</a>` : ""}
+            </div>
           </div>
         </div>
+        ${renderReceiptDetailTable(group.records)}
+      </section>
+    `;
+  }
+
+  function renderReceiptDetailTable(records) {
+    return `
+      <div class="table-wrap receipt-detail-table">
+        <table>
+          <thead>
+            <tr>
+              <th>証憑</th>
+              <th>日付</th>
+              <th>取引先</th>
+              <th>科目</th>
+              <th>品名</th>
+              <th class="num">個数</th>
+              <th class="num">単価</th>
+              <th>税区分</th>
+              <th>T番号</th>
+              <th>支払</th>
+              <th class="num">金額</th>
+              <th>メモ</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${records.map((item) => `<tr>
+              <td>${receiptProofThumb(item)}</td>
+              <td>${esc(formatDate(item.date))}</td>
+              <td><strong>${esc(item.vendor || "未入力")}</strong></td>
+              <td>${esc(item.category || "")}</td>
+              <td>${esc(item.itemName || "")}</td>
+              <td class="num">${esc(item.quantity || "")}</td>
+              <td class="num">${item.unitPrice ? yen(item.unitPrice) : "-"}</td>
+              <td>${esc(item.taxRate || "")} ${item.splitGroupId ? '<span class="badge warn">税率分割</span>' : ""}</td>
+              <td>${registrationBadge(item) || "-"}</td>
+              <td>${paymentBadge(item.paymentMethod)}</td>
+              <td class="num"><strong>${yen(item.amount)}</strong></td>
+              <td class="receipt-note-cell">${esc(item.note || "")}</td>
+              <td><div class="actions">${splitProofAction(item)}${rowActions("expenses", item.id)}</div></td>
+            </tr>`).join("")}
+          </tbody>
+        </table>
       </div>
     `;
   }
