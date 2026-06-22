@@ -604,6 +604,7 @@
 
   function renderReceipts() {
     const expenses = fiscalItems(state.expenses, "date").sort(byDate("date"));
+    const monthlyRows = monthlyReceiptSummaryRows(expenses);
     const filtered = receiptPaymentFilter === "all" ? expenses : expenses.filter((item) => item.paymentMethod === receiptPaymentFilter);
     const grouped = groupByMonth(filtered, "date");
 
@@ -615,6 +616,19 @@
         </div>
         <div class="panel-body">
           ${expenseForm("receiptForm", "登録", true)}
+        </div>
+      </section>
+
+      <section class="panel" style="margin-top:14px;">
+        <div class="panel-head">
+          <h2>月別集計表</h2>
+          <div class="actions">
+            <span class="badge">${yen(sum(monthlyRows, "total"))}</span>
+            <button class="button secondary small" id="exportReceiptMonthlyCsv" type="button">CSV</button>
+          </div>
+        </div>
+        <div class="panel-body">
+          ${renderReceiptMonthlySummary(monthlyRows)}
         </div>
       </section>
 
@@ -635,8 +649,122 @@
     `;
 
     document.getElementById("receiptForm").addEventListener("submit", handleExpenseSubmit);
+    document.getElementById("exportReceiptMonthlyCsv").addEventListener("click", () => exportCsv("receipt-monthly-summary", monthlyRows, receiptMonthlySummaryCsvFields()));
     bindExpenseFormHelpers("receiptForm");
     bindReceiptActions();
+  }
+
+  function monthlyReceiptSummaryRows(expenses) {
+    const grouped = groupByMonth(expenses, "date");
+    return fiscalMonths(selectedFiscalYear).map((month) => {
+      const records = grouped[month] || [];
+      const categoryTotals = records.reduce((acc, item) => {
+        const key = item.category || "未分類";
+        acc[key] = (acc[key] || 0) + num(item.amount);
+        return acc;
+      }, {});
+      const mainCategories = Object.entries(categoryTotals)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([category, amount]) => `${category} ${yen(amount)}`)
+        .join(" / ");
+      return {
+        month,
+        count: records.length,
+        total: sum(records, "amount"),
+        cardTotal: sum(records.filter((item) => item.paymentMethod === "card"), "amount"),
+        cashTotal: sum(records.filter((item) => item.paymentMethod === "cash"), "amount"),
+        bankTotal: sum(records.filter((item) => item.paymentMethod === "bank"), "amount"),
+        otherPaymentTotal: sum(records.filter((item) => !["card", "cash", "bank"].includes(item.paymentMethod)), "amount"),
+        tax10Total: sum(records.filter((item) => item.taxRate === "10%"), "amount"),
+        tax8Total: sum(records.filter((item) => item.taxRate === "8%"), "amount"),
+        otherTaxTotal: sum(records.filter((item) => !["10%", "8%"].includes(item.taxRate)), "amount"),
+        proofAttached: records.filter((item) => item.proof).length,
+        proofMissing: records.filter((item) => !item.proof).length,
+        registrationMissing: records.filter((item) => num(item.amount) >= 10000 && item.invoiceEligible && !isValidRegistration(item.registrationNumber)).length,
+        mainCategories
+      };
+    });
+  }
+
+  function renderReceiptMonthlySummary(rows) {
+    const nonEmptyCount = rows.filter((row) => row.count).length;
+    return `
+      <div class="table-wrap monthly-summary-table">
+        <table>
+          <thead>
+            <tr>
+              <th>月</th>
+              <th class="num">件数</th>
+              <th class="num">合計</th>
+              <th class="num">カード</th>
+              <th class="num">現金</th>
+              <th class="num">口座振込</th>
+              <th class="num">その他支払</th>
+              <th class="num">10%</th>
+              <th class="num">8%</th>
+              <th class="num">その他税</th>
+              <th>証憑</th>
+              <th>T番号不足</th>
+              <th>主な科目</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map((row) => `<tr class="${row.count ? "" : "is-empty"}">
+              <td><strong>${esc(monthLabel(row.month))}</strong></td>
+              <td class="num">${row.count}</td>
+              <td class="num">${yen(row.total)}</td>
+              <td class="num">${yen(row.cardTotal)}</td>
+              <td class="num">${yen(row.cashTotal)}</td>
+              <td class="num">${yen(row.bankTotal)}</td>
+              <td class="num">${yen(row.otherPaymentTotal)}</td>
+              <td class="num">${yen(row.tax10Total)}</td>
+              <td class="num">${yen(row.tax8Total)}</td>
+              <td class="num">${yen(row.otherTaxTotal)}</td>
+              <td>${row.count ? `${row.proofAttached}/${row.count}件${row.proofMissing ? ` <span class="badge warn">不足${row.proofMissing}</span>` : ` <span class="badge good">OK</span>`}` : "-"}</td>
+              <td>${row.registrationMissing ? `<span class="badge bad">${row.registrationMissing}件</span>` : "-"}</td>
+              <td>${esc(row.mainCategories || "-")}</td>
+            </tr>`).join("")}
+          </tbody>
+          <tfoot>
+            <tr>
+              <th>年度合計</th>
+              <th class="num">${sum(rows, "count")}</th>
+              <th class="num">${yen(sum(rows, "total"))}</th>
+              <th class="num">${yen(sum(rows, "cardTotal"))}</th>
+              <th class="num">${yen(sum(rows, "cashTotal"))}</th>
+              <th class="num">${yen(sum(rows, "bankTotal"))}</th>
+              <th class="num">${yen(sum(rows, "otherPaymentTotal"))}</th>
+              <th class="num">${yen(sum(rows, "tax10Total"))}</th>
+              <th class="num">${yen(sum(rows, "tax8Total"))}</th>
+              <th class="num">${yen(sum(rows, "otherTaxTotal"))}</th>
+              <th>${sum(rows, "proofAttached")}/${sum(rows, "count")}件</th>
+              <th>${sum(rows, "registrationMissing")}件</th>
+              <th>${nonEmptyCount}か月分</th>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    `;
+  }
+
+  function receiptMonthlySummaryCsvFields() {
+    return [
+      ["month", "月"],
+      ["count", "件数"],
+      ["total", "合計"],
+      ["cardTotal", "カード"],
+      ["cashTotal", "現金"],
+      ["bankTotal", "口座振込"],
+      ["otherPaymentTotal", "その他支払"],
+      ["tax10Total", "10%"],
+      ["tax8Total", "8%"],
+      ["otherTaxTotal", "その他税区分"],
+      ["proofAttached", "証憑あり"],
+      ["proofMissing", "証憑不足"],
+      ["registrationMissing", "T番号不足"],
+      ["mainCategories", "主な科目"]
+    ];
   }
 
   function renderExpenses() {

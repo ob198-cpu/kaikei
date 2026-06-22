@@ -814,6 +814,21 @@ tr:last-child td {
   border-bottom: 0;
 }
 
+.monthly-summary-table tfoot th {
+  background: #f1f5fa;
+  border-top: 2px solid #bdc9d8;
+  font-weight: 900;
+}
+
+.monthly-summary-table table {
+  min-width: 1260px;
+}
+
+.monthly-summary-table tr.is-empty td {
+  color: #8a95a6;
+  background: #fafbfd;
+}
+
 .empty {
   background: #fff;
   border: 1px dashed #bdc6d3;
