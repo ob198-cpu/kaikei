@@ -260,20 +260,52 @@
   function applyBundledReceiptMigrations() {
     const migrationId = "receipt-157347-2026-03-v2";
     state.settings.appliedMigrations = Array.isArray(state.settings.appliedMigrations) ? state.settings.appliedMigrations : [];
+    if (!state.settings.appliedMigrations.includes(migrationId)) {
+
+      state.expenses = Array.isArray(state.expenses) ? state.expenses : [];
+      const staleBefore = state.expenses.length;
+      state.expenses = state.expenses.filter((item) => !(
+        item.date === "2026-03-01"
+        && item.vendor === "ツルハドラッグ 福井店"
+        && num(item.amount) === 22436
+        && !item.splitGroupId
+      ));
+
+      let addedCount = 0;
+      let updatedCount = 0;
+      bundledReceipt157347Expenses().forEach((record) => {
+        const existing = state.expenses.find((item) => item.id === record.id);
+        if (existing) {
+          Object.assign(existing, record, {
+            createdAt: existing.createdAt || record.createdAt,
+            updatedAt: new Date().toISOString()
+          });
+          updatedCount += 1;
+          return;
+        }
+        state.expenses.push(record);
+        addedCount += 1;
+      });
+      state.settings.appliedMigrations.push(migrationId);
+      if (addedCount || updatedCount || staleBefore !== state.expenses.length) {
+        addAudit("157347領収書台紙反映", {
+          added: addedCount,
+          updated: updatedCount,
+          replaced: staleBefore - state.expenses.length + addedCount
+        });
+      }
+    }
+    applyBundledExpenseMigration("receipt-202603-additional-boards-v1", bundledReceipt202603AdditionalExpenses(), "2026年3月追加領収書台紙反映");
+  }
+
+  function applyBundledExpenseMigration(migrationId, records, auditName) {
+    state.settings.appliedMigrations = Array.isArray(state.settings.appliedMigrations) ? state.settings.appliedMigrations : [];
     if (state.settings.appliedMigrations.includes(migrationId)) return;
 
     state.expenses = Array.isArray(state.expenses) ? state.expenses : [];
-    const staleBefore = state.expenses.length;
-    state.expenses = state.expenses.filter((item) => !(
-      item.date === "2026-03-01"
-      && item.vendor === "ツルハドラッグ 福井店"
-      && num(item.amount) === 22436
-      && !item.splitGroupId
-    ));
-
     let addedCount = 0;
     let updatedCount = 0;
-    bundledReceipt157347Expenses().forEach((record) => {
+    records.forEach((record) => {
       const existing = state.expenses.find((item) => item.id === record.id);
       if (existing) {
         Object.assign(existing, record, {
@@ -287,11 +319,10 @@
       addedCount += 1;
     });
     state.settings.appliedMigrations.push(migrationId);
-    if (addedCount || updatedCount || staleBefore !== state.expenses.length) {
-      addAudit("157347領収書台紙反映", {
+    if (addedCount || updatedCount) {
+      addAudit(auditName, {
         added: addedCount,
-        updated: updatedCount,
-        replaced: staleBefore - state.expenses.length + addedCount
+        updated: updatedCount
       });
     }
   }
@@ -413,6 +444,335 @@
         expenseEligibilityReason: "飲食代は相手先・人数・目的が未記載のため不適格。接待交際費なら内容を追記して変更。",
         proof: proof("157347-shinshin.jpg", "157347_芯々飲食代.jpg"),
         note: "157347台紙より登録。「ご飲食代として」。日付と支払区分は台紙情報から登録。"
+      }
+    ];
+  }
+
+  function bundledReceipt202603AdditionalExpenses() {
+    const createdAt = "2026-06-23T00:00:00.000+09:00";
+    const base = {
+      department: "共通費",
+      quantity: 1,
+      unit: "式",
+      paymentMethod: "card",
+      invoiceEligible: true,
+      createdAt
+    };
+    const proof = (boardFile, fileName, label) => ({
+      name: label,
+      type: "image/jpeg",
+      size: 0,
+      dataUrl: `assets/receipts/${fileName}`,
+      fullDataUrl: `assets/receipts/${boardFile}`,
+      fullName: `${boardFile.replace(".jpg", "")}_領収書台紙_全体.jpg`
+    });
+    return [
+      {
+        ...base,
+        id: "exp-157352-skyshop-ogasawara",
+        date: "2026-03-18",
+        vendor: "スカイショップ小笠原",
+        category: "交際費",
+        itemName: "マルセイバターサンド",
+        quantity: 2,
+        unitPrice: 4950,
+        amount: 9900,
+        taxRate: "8%",
+        registrationNumber: "T5430001044080",
+        expenseEligibility: "ineligible",
+        expenseEligibilityReason: "土産・食品の購入で、渡した相手先・業務目的が未記載のため不適格。贈答・接待目的なら相手先と理由を追記して変更。",
+        proof: proof("157352_0.jpg", "157352-skyshop.jpg", "157352_スカイショップ小笠原.jpg"),
+        note: "157352台紙より登録。クレジット。軽減税率8%対象。"
+      },
+      {
+        ...base,
+        id: "exp-157352-airport-b-parking",
+        date: "2026-03-18",
+        vendor: "北海道エアポート 新千歳空港B駐車場",
+        category: "旅費交通費",
+        itemName: "新千歳空港B駐車場 駐車料金",
+        unitPrice: 12500,
+        amount: 12500,
+        taxRate: "10%",
+        registrationNumber: "T7430001079728",
+        expenseEligibility: "eligible",
+        expenseEligibilityReason: "移動時の駐車料金として業務移動に紐づけられるため適格。",
+        proof: proof("157352_0.jpg", "157352-airport-b.jpg", "157352_新千歳空港B駐車場.jpg"),
+        note: "157352台紙より登録。JCBカード。駐車時間2日13時間26分。"
+      },
+      {
+        ...base,
+        id: "exp-157352-nihon-kotsu-taxi",
+        date: "2026-03-18",
+        vendor: "日本交通グループ 旭日交通",
+        category: "旅費交通費",
+        itemName: "タクシー代",
+        unitPrice: 2700,
+        amount: 2700,
+        taxRate: "10%",
+        registrationNumber: "T9011801008643",
+        expenseEligibility: "eligible",
+        expenseEligibilityReason: "移動時のタクシー代として業務移動に紐づけられるため適格。",
+        proof: proof("157352_0.jpg", "157352-nichiko-taxi.jpg", "157352_日本交通タクシー.jpg"),
+        note: "157352台紙より登録。クレジットカード支払。"
+      },
+      {
+        ...base,
+        id: "exp-157352-daiwa-taxi",
+        date: "2026-03-19",
+        vendor: "省東自動車株式会社 DAIWA TAXI GROUP",
+        category: "旅費交通費",
+        itemName: "タクシー代",
+        unitPrice: 4000,
+        amount: 4000,
+        taxRate: "10%",
+        registrationNumber: "T1011401003119",
+        expenseEligibility: "eligible",
+        expenseEligibilityReason: "移動時のタクシー代として業務移動に紐づけられるため適格。",
+        proof: proof("157352_0.jpg", "157352-daiwa-taxi.jpg", "157352_DAIWAタクシー.jpg"),
+        note: "157352台紙より登録。JCBカード。"
+      },
+      {
+        ...base,
+        id: "exp-157352-minacia",
+        date: "2026-03-18",
+        vendor: "株式会社ミナシア",
+        category: "交際費",
+        itemName: "飲食代",
+        unitPrice: 73160,
+        amount: 73160,
+        taxRate: "10%",
+        registrationNumber: "T3010001187428",
+        expenseEligibility: "ineligible",
+        expenseEligibilityReason: "飲食代は相手先・人数・目的が未記載のため不適格。接待交際費なら内容を追記して変更。",
+        proof: proof("157352_0.jpg", "157352-minacia.jpg", "157352_株式会社ミナシア飲食代.jpg"),
+        note: "157352台紙より登録。25点。用途は税理士確認推奨。"
+      },
+      {
+        ...base,
+        id: "exp-157352-ichozaka",
+        date: "2026-03-18",
+        vendor: "BISTRO JAPONaIS ICHOZAKA",
+        category: "交際費",
+        itemName: "カフェ利用",
+        unitPrice: 1808,
+        amount: 1808,
+        taxRate: "10%",
+        registrationNumber: "T5013301022046",
+        expenseEligibility: "ineligible",
+        expenseEligibilityReason: "飲食代は相手先・人数・目的が未記載のため不適格。打合せ利用なら相手先と目的を追記して変更。",
+        proof: proof("157352_0.jpg", "157352-ichozaka.jpg", "157352_イチョウザカ飲食代.jpg"),
+        note: "157352台紙より登録。クレジット。日付は台紙情報から登録。"
+      },
+      {
+        ...base,
+        id: "exp-157351-joyful-large",
+        date: "2026-03-10",
+        vendor: "ジョイフルエーケー 屯田店",
+        category: "消耗品費",
+        itemName: "ホームセンター購入分",
+        unitPrice: 28145,
+        amount: 28145,
+        taxRate: "10%",
+        registrationNumber: "T5430001027374",
+        expenseEligibility: "eligible",
+        expenseEligibilityReason: "ホームセンターでの業務用資材・消耗品購入として登録するため適格。",
+        proof: proof("157351_0.jpg", "157351-joyful-large.jpg", "157351_ジョイフルエーケー28145円.jpg"),
+        note: "157351台紙より登録。クレジット。85点。"
+      },
+      {
+        ...base,
+        id: "exp-157351-joyful-small",
+        date: "2026-03-10",
+        vendor: "ジョイフルエーケー 屯田店",
+        category: "消耗品費",
+        itemName: "ホームセンター購入分",
+        unitPrice: 8279,
+        amount: 8279,
+        taxRate: "10%",
+        registrationNumber: "T5430001027374",
+        expenseEligibility: "eligible",
+        expenseEligibilityReason: "ホームセンターでの業務用資材・消耗品購入として登録するため適格。",
+        proof: proof("157351_0.jpg", "157351-joyful-small.jpg", "157351_ジョイフルエーケー8279円.jpg"),
+        note: "157351台紙より登録。クレジット。2点。"
+      },
+      {
+        ...base,
+        id: "exp-157351-eneos-gas",
+        date: "2026-03-12",
+        vendor: "北海道エネルギー セルフ新川SS",
+        category: "燃料費",
+        itemName: "ガソリン代",
+        unitPrice: 11958,
+        amount: 11958,
+        taxRate: "10%",
+        registrationNumber: "T9430001037048",
+        expenseEligibility: "eligible",
+        expenseEligibilityReason: "移動・車両利用に伴う燃料費として業務利用車両に紐づけられるため適格。",
+        proof: proof("157351_0.jpg", "157351-eneos-gas.jpg", "157351_ENEOS燃料費.jpg"),
+        note: "157351台紙より登録。JCBカード。軽油79.01L。"
+      },
+      {
+        ...base,
+        id: "exp-157351-cosmo",
+        date: "2026-03-12",
+        vendor: "キタセキ北海道 札幌新川SS",
+        category: "車両費",
+        itemName: "洗車・ワイパー等",
+        unitPrice: 1200,
+        amount: 1200,
+        taxRate: "10%",
+        registrationNumber: "T1370801000359",
+        expenseEligibility: "eligible",
+        expenseEligibilityReason: "車両関連の洗車・備品代として業務利用車両に紐づけられるため適格。",
+        proof: proof("157351_0.jpg", "157351-cosmo.jpg", "157351_COSMO車両費.jpg"),
+        note: "157351台紙より登録。JCBカード。"
+      },
+      {
+        ...base,
+        id: "exp-157351-joyful-right",
+        date: "2026-03-10",
+        vendor: "ジョイフルエーケー 屯田店",
+        category: "消耗品費",
+        itemName: "ホームセンター購入分",
+        unitPrice: 2098,
+        amount: 2098,
+        taxRate: "10%",
+        registrationNumber: "T5430001027374",
+        expenseEligibility: "eligible",
+        expenseEligibilityReason: "ホームセンターでの業務用資材・消耗品購入として登録するため適格。",
+        proof: proof("157351_0.jpg", "157351-joyful-right.jpg", "157351_ジョイフルエーケー2098円.jpg"),
+        note: "157351台紙より登録。クレジット。日付は台紙情報から登録。"
+      },
+      {
+        ...base,
+        id: "exp-157351-restaurant-8",
+        date: "2026-03-12",
+        vendor: "半田屋 北33条東店",
+        category: "交際費",
+        itemName: "飲食代 8%対象",
+        unitPrice: 1229,
+        amount: 1229,
+        taxRate: "8%",
+        registrationNumber: "T3010001260886",
+        expenseEligibility: "ineligible",
+        expenseEligibilityReason: "飲食代は相手先・人数・目的が未記載のため不適格。業務上の打合せや接待なら内容を追記して変更。",
+        splitGroupId: "split-157351-restaurant",
+        proof: proof("157351_0.jpg", "157351-restaurant.jpg", "157351_半田屋飲食代.jpg"),
+        note: "157351台紙より登録。税率別に8%対象額を分割。クレジット。"
+      },
+      {
+        ...base,
+        id: "exp-157351-restaurant-10",
+        date: "2026-03-12",
+        vendor: "半田屋 北33条東店",
+        category: "交際費",
+        itemName: "飲食代 10%対象",
+        unitPrice: 1617,
+        amount: 1617,
+        taxRate: "10%",
+        registrationNumber: "T3010001260886",
+        expenseEligibility: "ineligible",
+        expenseEligibilityReason: "飲食代は相手先・人数・目的が未記載のため不適格。業務上の打合せや接待なら内容を追記して変更。",
+        splitGroupId: "split-157351-restaurant",
+        proof: proof("157351_0.jpg", "157351-restaurant.jpg", "157351_半田屋飲食代.jpg"),
+        note: "157351台紙より登録。税率別に10%対象額を分割。クレジット。"
+      },
+      {
+        ...base,
+        id: "exp-157353-parking",
+        date: "2026-03-24",
+        vendor: "ハーフネット札幌すすきの南5西6",
+        category: "旅費交通費",
+        itemName: "駐車料金",
+        unitPrice: 1200,
+        amount: 1200,
+        taxRate: "10%",
+        registrationNumber: "T7140001082323",
+        expenseEligibility: "eligible",
+        expenseEligibilityReason: "移動時の駐車料金として業務移動に紐づけられるため適格。100円クーポン券は経費登録対象外。",
+        proof: proof("157353_0.jpg", "157353-parking.jpg", "157353_ハーフネット駐車場.jpg"),
+        note: "157353台紙より登録。100円クーポン券は未使用券のため登録対象外。"
+      },
+      {
+        ...base,
+        id: "exp-157353-eneos-wash",
+        date: "2026-03-24",
+        vendor: "北海道エネルギー DDチャレンジ恵み野SS",
+        category: "車両費",
+        itemName: "洗車・下部洗浄",
+        unitPrice: 3190,
+        amount: 3190,
+        taxRate: "10%",
+        registrationNumber: "T9430001037048",
+        expenseEligibility: "eligible",
+        expenseEligibilityReason: "車両関連の洗車代として業務利用車両に紐づけられるため適格。",
+        proof: proof("157353_0.jpg", "157353-eneos-wash.jpg", "157353_ENEOS洗車.jpg"),
+        note: "157353台紙より登録。クレジット一括払い。"
+      },
+      {
+        ...base,
+        id: "exp-157350-barcelona-receipt",
+        date: "2026-03-04",
+        vendor: "BARCELONA P&J",
+        category: "交際費",
+        itemName: "飲食代",
+        unitPrice: 12200,
+        amount: 12200,
+        taxRate: "10%",
+        registrationNumber: "T8430001073408",
+        expenseEligibility: "ineligible",
+        expenseEligibilityReason: "飲食代は相手先・人数・目的が未記載のため不適格。接待交際費なら内容を追記して変更。",
+        proof: proof("157350_0.jpg", "157350-barcelona-receipt.jpg", "157350_BARCELONA_12200円.jpg"),
+        note: "157350台紙より登録。JCBカード。"
+      },
+      {
+        ...base,
+        id: "exp-157350-barcelona-formal",
+        date: "2026-03-03",
+        vendor: "BARCELONA P&J",
+        category: "交際費",
+        itemName: "飲食代",
+        unitPrice: 201200,
+        amount: 201200,
+        taxRate: "10%",
+        registrationNumber: "T8430001073408",
+        expenseEligibility: "ineligible",
+        expenseEligibilityReason: "高額飲食代で、相手先・人数・目的が未記載のため不適格。接待交際費なら参加者と目的を必ず追記。",
+        proof: proof("157350_0.jpg", "157350-barcelona-formal.jpg", "157350_BARCELONA_201200円.jpg"),
+        note: "157350台紙より登録。手書き領収証。税理士確認推奨。"
+      },
+      {
+        ...base,
+        id: "exp-157350-times-parking",
+        date: "2026-03-03",
+        vendor: "タイムズすすきの新南町通り",
+        category: "旅費交通費",
+        itemName: "駐車料金",
+        unitPrice: 3200,
+        amount: 3200,
+        taxRate: "10%",
+        registrationNumber: "T4010001137274",
+        expenseEligibility: "eligible",
+        expenseEligibilityReason: "移動時の駐車料金として業務移動に紐づけられるため適格。",
+        proof: proof("157350_0.jpg", "157350-times.jpg", "157350_タイムズ駐車場.jpg"),
+        note: "157350台紙より登録。クレジット。"
+      },
+      {
+        ...base,
+        id: "exp-157350-miyanomori",
+        date: "2026-03-05",
+        vendor: "宮の森珈琲 山の手店",
+        category: "交際費",
+        itemName: "飲食代",
+        unitPrice: 2300,
+        amount: 2300,
+        taxRate: "10%",
+        registrationNumber: "T8430002031934",
+        expenseEligibility: "ineligible",
+        expenseEligibilityReason: "飲食代は相手先・人数・目的が未記載のため不適格。打合せ利用なら相手先と目的を追記して変更。",
+        proof: proof("157350_0.jpg", "157350-miyanomori.jpg", "157350_宮の森珈琲.jpg"),
+        note: "157350台紙より登録。クレジット。"
       }
     ];
   }
