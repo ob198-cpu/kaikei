@@ -251,7 +251,7 @@
   }
 
   function applyBundledReceiptMigrations() {
-    const migrationId = "receipt-157347-2026-03";
+    const migrationId = "receipt-157347-2026-03-v2";
     state.settings.appliedMigrations = Array.isArray(state.settings.appliedMigrations) ? state.settings.appliedMigrations : [];
     if (state.settings.appliedMigrations.includes(migrationId)) return;
 
@@ -264,25 +264,32 @@
       && !item.splitGroupId
     ));
 
-    const existingIds = new Set(state.expenses.map((item) => item.id));
-    const records = bundledReceipt157347Expenses().filter((item) => !existingIds.has(item.id));
-    state.expenses.push(...records);
+    let addedCount = 0;
+    let updatedCount = 0;
+    bundledReceipt157347Expenses().forEach((record) => {
+      const existing = state.expenses.find((item) => item.id === record.id);
+      if (existing) {
+        Object.assign(existing, record, {
+          createdAt: existing.createdAt || record.createdAt,
+          updatedAt: new Date().toISOString()
+        });
+        updatedCount += 1;
+        return;
+      }
+      state.expenses.push(record);
+      addedCount += 1;
+    });
     state.settings.appliedMigrations.push(migrationId);
-    if (records.length || staleBefore !== state.expenses.length) {
+    if (addedCount || updatedCount || staleBefore !== state.expenses.length) {
       addAudit("157347領収書台紙反映", {
-        added: records.length,
-        replaced: staleBefore - state.expenses.length + records.length
+        added: addedCount,
+        updated: updatedCount,
+        replaced: staleBefore - state.expenses.length + addedCount
       });
     }
   }
 
   function bundledReceipt157347Expenses() {
-    const proof = {
-      name: "157347_領収書台紙_2026年3月.jpg",
-      type: "image/jpeg",
-      size: 0,
-      dataUrl: "assets/receipts/157347.jpg"
-    };
     const createdAt = "2026-06-23T00:00:00.000+09:00";
     const base = {
       department: "共通費",
@@ -290,9 +297,16 @@
       unit: "式",
       paymentMethod: "card",
       invoiceEligible: true,
-      proof,
       createdAt
     };
+    const proof = (fileName, label) => ({
+      name: label,
+      type: "image/jpeg",
+      size: 0,
+      dataUrl: `assets/receipts/${fileName}`,
+      fullDataUrl: "assets/receipts/157347.jpg",
+      fullName: "157347_領収書台紙_全体.jpg"
+    });
     return [
       {
         ...base,
@@ -306,6 +320,7 @@
         taxRate: "10%",
         registrationNumber: "T1430001010672",
         splitGroupId: "split-157347-tsuruha",
+        proof: proof("157347-tsuruha.jpg", "157347_ツルハドラッグ福井店.jpg"),
         note: "157347台紙より登録。領収書の10%対象額。支払区分は台紙のクレジット表記でカード。"
       },
       {
@@ -320,6 +335,7 @@
         taxRate: "8%",
         registrationNumber: "T1430001010672",
         splitGroupId: "split-157347-tsuruha",
+        proof: proof("157347-tsuruha.jpg", "157347_ツルハドラッグ福井店.jpg"),
         note: "157347台紙より登録。領収書の8%対象額。支払区分は台紙のクレジット表記でカード。"
       },
       {
@@ -333,6 +349,7 @@
         amount: 1000,
         taxRate: "10%",
         registrationNumber: "T1370801000359",
+        proof: proof("157347-cosmo.jpg", "157347_COSMO洗車.jpg"),
         note: "157347台紙より登録。AMEX下4桁1006。車両関連洗車代。"
       },
       {
@@ -347,6 +364,7 @@
         amount: 15138,
         taxRate: "10%",
         registrationNumber: "T4430001015181",
+        proof: proof("157347-lucky.jpg", "157347_LUCKY篠路店.jpg"),
         note: "157347台紙より登録。クレジット。用途は税理士確認推奨。"
       },
       {
@@ -360,6 +378,7 @@
         amount: 1000,
         taxRate: "10%",
         registrationNumber: "T7430001079728",
+        proof: proof("157347-parking.jpg", "157347_新千歳空港A駐車場.jpg"),
         note: "157347台紙より登録。JCBカード。駐車時間1時間17分。"
       },
       {
@@ -373,6 +392,7 @@
         amount: 67155,
         taxRate: "10%",
         registrationNumber: "T8430001067178",
+        proof: proof("157347-shinshin.jpg", "157347_芯々飲食代.jpg"),
         note: "157347台紙より登録。「ご飲食代として」。日付と支払区分は台紙情報から登録。"
       }
     ];
@@ -3792,10 +3812,19 @@
       .filter(([key]) => !["id", "proof", "file"].includes(key))
       .map(([key, value]) => `<dt>${esc(labelFor(key))}</dt><dd>${esc(displayValue(key, value))}</dd>`)
       .join("");
+    const proofHtml = proof ? (proof.type && proof.type.startsWith("image/")
+      ? `<div class="proof-preview">
+          <div class="proof-actions">
+            <a class="button secondary small" href="${esc(proof.dataUrl)}" target="_blank" rel="noopener">画像を拡大</a>
+            ${proof.fullDataUrl ? `<a class="button secondary small" href="${esc(proof.fullDataUrl)}" target="_blank" rel="noopener">台紙全体を開く</a>` : ""}
+          </div>
+          <a class="proof-image-link" href="${esc(proof.dataUrl)}" target="_blank" rel="noopener" title="画像を拡大">
+            <img class="preview-image" src="${esc(proof.dataUrl)}" alt="${esc(proof.name)}">
+          </a>
+        </div>`
+      : `<div class="notice info">${esc(proof.name)} を保存済みです。</div>`) : "";
     dialogBody.innerHTML = `
-      ${proof ? (proof.type && proof.type.startsWith("image/")
-        ? `<img class="preview-image" src="${proof.dataUrl}" alt="${esc(proof.name)}">`
-        : `<div class="notice info">${esc(proof.name)} を保存済みです。</div>`) : ""}
+      ${proofHtml}
       <dl class="detail-list" style="margin-top:14px;">${rows}</dl>
     `;
     dialog.showModal();
