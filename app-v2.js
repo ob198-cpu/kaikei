@@ -5217,6 +5217,31 @@
     try {
       const text = await file.text();
       const imported = JSON.parse(text);
+      if (imported && imported.type === "expense-append" && Array.isArray(imported.expenses)) {
+        const existingIds = new Set((state.expenses || []).map((item) => item.id));
+        const incomingExpenses = imported.expenses.map((item) => ({
+          ...item,
+          id: item.id && !existingIds.has(item.id) ? item.id : uid("exp"),
+          createdAt: item.createdAt || new Date().toISOString()
+        }));
+        incomingExpenses.forEach((item) => existingIds.add(item.id));
+        state.expenses = Array.isArray(state.expenses) ? state.expenses : [];
+        state.expenses.push(...incomingExpenses);
+        if (Array.isArray(imported.receivedDocs) && imported.receivedDocs.length) {
+          state.receivedDocs = Array.isArray(state.receivedDocs) ? state.receivedDocs : [];
+          state.receivedDocs.push(...imported.receivedDocs.map((item) => ({
+            ...item,
+            id: item.id || uid("doc"),
+            createdAt: item.createdAt || new Date().toISOString()
+          })));
+        }
+        addAudit("経費追加取込", { file: file.name, count: incomingExpenses.length });
+        persist("経費追加取込");
+        if (incomingExpenses[0] && incomingExpenses[0].date) showFiscalYearForDate(incomingExpenses[0].date);
+        render();
+        alert(`${incomingExpenses.length}件の経費を追加しました。`);
+        return;
+      }
       const incoming = imported.state || imported;
       if (!incoming || !incoming.settings) throw new Error("invalid");
       if (!confirm("現在のデータを、選択したバックアップで置き換えます。続けますか？")) return;
