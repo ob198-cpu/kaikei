@@ -3676,9 +3676,9 @@
         <table>
           <thead><tr><th>日付</th><th>科目</th><th>部門</th><th>取引先</th><th>品名</th><th class="num">個数</th><th class="num">単価</th><th class="num">金額</th><th>支払</th><th>経費適格</th><th>税区分</th><th>T番号</th><th>証憑</th><th>申請</th><th>操作</th></tr></thead>
           <tbody>${items.map((item) => `<tr>
-            <td>${esc(formatDate(item.date))}</td><td>${esc(item.category)}</td><td>${esc(item.department || departments()[0])}</td><td>${esc(item.vendor)}</td><td>${esc(item.itemName)} ${item.splitGroupId ? '<span class="badge">税率分割</span>' : ""}</td>
-            <td class="num">${esc(item.quantity || "")}</td><td class="num">${item.unitPrice ? yen(item.unitPrice) : ""}</td><td class="num">${yen(item.amount)}</td>
-            <td>${paymentBadge(item.paymentMethod)}</td><td>${expenseEligibilityBadge(item)}</td><td>${esc(item.taxRate || "")}</td>
+            <td>${dateOrMissing(item.date)}</td><td>${displayOrMissing(item.category)}</td><td>${displayOrMissing(item.department || departments()[0])}</td><td>${displayOrMissing(item.vendor)}</td><td>${displayOrMissing(item.itemName)} ${item.splitGroupId ? '<span class="badge">税率分割</span>' : ""}</td>
+            <td class="num">${displayOrMissing(item.quantity)}</td><td class="num">${moneyOrMissing(item.unitPrice)}</td><td class="num">${yen(item.amount)}</td>
+            <td>${paymentBadge(item.paymentMethod)}</td><td>${expenseEligibilityBadge(item)}</td><td>${displayOrMissing(item.taxRate)}</td>
             <td>${registrationBadge(item)}</td><td>${item.proof ? '<span class="badge good">有</span>' : '<span class="badge warn">無</span>'}</td><td>${expensePaymentRequestCell(item)}</td><td>${rowActions("expenses", item.id)}</td>
           </tr>`).join("")}</tbody>
         </table>
@@ -4066,18 +4066,18 @@
           <tbody>
             ${records.map((item) => `<tr>
               <td>${receiptProofThumb(item)}</td>
-              <td>${esc(formatDate(item.date))}</td>
-              <td><strong>${esc(item.vendor || "未入力")}</strong></td>
-              <td>${esc(item.category || "")}</td>
-              <td>${esc(item.itemName || "")}</td>
-              <td class="num">${esc(item.quantity || "")}</td>
-              <td class="num">${item.unitPrice ? yen(item.unitPrice) : "-"}</td>
-              <td>${esc(item.taxRate || "")} ${item.splitGroupId ? '<span class="badge warn">税率分割</span>' : ""}</td>
-              <td>${registrationBadge(item) || "-"}</td>
+              <td>${dateOrMissing(item.date)}</td>
+              <td><strong>${displayOrMissing(item.vendor)}</strong></td>
+              <td>${displayOrMissing(item.category)}</td>
+              <td>${displayOrMissing(item.itemName)}</td>
+              <td class="num">${displayOrMissing(item.quantity)}</td>
+              <td class="num">${moneyOrMissing(item.unitPrice)}</td>
+              <td>${displayOrMissing(item.taxRate)} ${item.splitGroupId ? '<span class="badge warn">税率分割</span>' : ""}</td>
+              <td>${registrationBadge(item)}</td>
               <td>${paymentBadge(item.paymentMethod)}</td>
               <td>${expenseEligibilityBadge(item)}</td>
               <td class="num"><strong>${yen(item.amount)}</strong></td>
-              <td class="receipt-note-cell">${esc(item.note || "")}</td>
+              <td class="receipt-note-cell">${displayOrMissing(item.note)}</td>
               <td><div class="actions">${splitProofAction(item)}${rowActions("expenses", item.id)}</div></td>
             </tr>`).join("")}
           </tbody>
@@ -4468,7 +4468,7 @@
     const proof = item.proof || item.file;
     const rows = Object.entries(item)
       .filter(([key]) => !["id", "proof", "file"].includes(key))
-      .map(([key, value]) => `<dt>${esc(labelFor(key))}</dt><dd>${esc(displayValue(key, value))}</dd>`)
+      .map(([key, value]) => `<dt>${esc(labelFor(key))}</dt><dd>${displayValueHtml(key, value)}</dd>`)
       .join("");
     const proofHtml = proof ? (proof.type && proof.type.startsWith("image/")
       ? `<div class="proof-preview">
@@ -6714,6 +6714,7 @@
   }
 
   function paymentBadge(value) {
+    if (!hasDisplayValue(value)) return missingValueHtml();
     const label = paymentLabel(value);
     const cls = value === "card" ? "card" : value === "cash" ? "cash" : value === "bank" ? "bank" : "";
     return `<span class="badge ${cls}">${esc(label)}</span>`;
@@ -6893,7 +6894,7 @@
     if (item.registrationNumber && isValidRegistration(item.registrationNumber)) return esc(item.registrationNumber);
     if (item.registrationNumber) return `<span class="badge bad">${esc(item.registrationNumber)}</span>`;
     if (num(item.amount) >= 10000 && item.invoiceEligible) return '<span class="badge bad">要確認</span>';
-    return "";
+    return missingValueHtml();
   }
 
   function categories() {
@@ -7217,6 +7218,35 @@
 
   function lines(value) {
     return String(value || "").split(/\r?\n/).map(clean).filter(Boolean);
+  }
+
+  function hasDisplayValue(value) {
+    if (value === null || value === undefined) return false;
+    if (typeof value === "number") return Number.isFinite(value);
+    return clean(value) !== "";
+  }
+
+  function missingValueHtml() {
+    return '<span class="missing-value">未記入</span>';
+  }
+
+  function displayOrMissing(value) {
+    return hasDisplayValue(value) ? esc(value) : missingValueHtml();
+  }
+
+  function dateOrMissing(value) {
+    return displayOrMissing(formatDate(value));
+  }
+
+  function moneyOrMissing(value) {
+    return hasDisplayValue(value) && num(value) ? yen(value) : missingValueHtml();
+  }
+
+  function displayValueHtml(key, value) {
+    const moneyKeys = ["amount", "amountTotal", "unitPrice", "fuelClaim", "lodging", "total", "basePay", "allowance", "deduction", "netPay", "debit", "credit", "balance", "previous", "current", "diff"];
+    if (moneyKeys.includes(key) && !hasDisplayValue(value)) return missingValueHtml();
+    const displayed = displayValue(key, value);
+    return hasDisplayValue(displayed) ? esc(displayed) : missingValueHtml();
   }
 
   function displayValue(key, value) {

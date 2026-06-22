@@ -1151,6 +1151,11 @@ tr:last-child td {
   color: var(--good);
 }
 
+.missing-value {
+  color: var(--bad);
+  font-weight: 900;
+}
+
 .detail-list {
   display: grid;
   grid-template-columns: 160px 1fr;
