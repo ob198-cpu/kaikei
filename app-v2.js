@@ -122,6 +122,7 @@
     ensureHistoryNav();
     seedFiscalOptions();
     bindGlobalEvents();
+    applyBundledReceiptMigrations();
     persist("自動保存");
     render();
   }
@@ -247,6 +248,134 @@
     if (!clean(normalized.settings.documentSealText)) normalized.settings.documentSealText = base.settings.documentSealText;
     if (!clean(normalized.settings.documentFooterNote)) normalized.settings.documentFooterNote = base.settings.documentFooterNote;
     return normalized;
+  }
+
+  function applyBundledReceiptMigrations() {
+    const migrationId = "receipt-157347-2026-03";
+    state.settings.appliedMigrations = Array.isArray(state.settings.appliedMigrations) ? state.settings.appliedMigrations : [];
+    if (state.settings.appliedMigrations.includes(migrationId)) return;
+
+    state.expenses = Array.isArray(state.expenses) ? state.expenses : [];
+    const staleBefore = state.expenses.length;
+    state.expenses = state.expenses.filter((item) => !(
+      item.date === "2026-03-01"
+      && item.vendor === "ツルハドラッグ 福井店"
+      && num(item.amount) === 22436
+      && !item.splitGroupId
+    ));
+
+    const existingIds = new Set(state.expenses.map((item) => item.id));
+    const records = bundledReceipt157347Expenses().filter((item) => !existingIds.has(item.id));
+    state.expenses.push(...records);
+    state.settings.appliedMigrations.push(migrationId);
+    if (records.length || staleBefore !== state.expenses.length) {
+      addAudit("157347領収書台紙反映", {
+        added: records.length,
+        replaced: staleBefore - state.expenses.length + records.length
+      });
+    }
+  }
+
+  function bundledReceipt157347Expenses() {
+    const proof = {
+      name: "157347_領収書台紙_2026年3月.jpg",
+      type: "image/jpeg",
+      size: 0,
+      dataUrl: "assets/receipts/157347.jpg"
+    };
+    const createdAt = "2026-06-23T00:00:00.000+09:00";
+    const base = {
+      department: "共通費",
+      quantity: 1,
+      unit: "式",
+      paymentMethod: "card",
+      invoiceEligible: true,
+      proof,
+      createdAt
+    };
+    return [
+      {
+        ...base,
+        id: "exp-157347-tsuruha-10",
+        date: "2026-03-01",
+        vendor: "ツルハドラッグ 福井店",
+        category: "消耗品費",
+        itemName: "ツルハ購入分 10%対象",
+        unitPrice: 8716,
+        amount: 8716,
+        taxRate: "10%",
+        registrationNumber: "T1430001010672",
+        splitGroupId: "split-157347-tsuruha",
+        note: "157347台紙より登録。領収書の10%対象額。支払区分は台紙のクレジット表記でカード。"
+      },
+      {
+        ...base,
+        id: "exp-157347-tsuruha-8",
+        date: "2026-03-01",
+        vendor: "ツルハドラッグ 福井店",
+        category: "消耗品費",
+        itemName: "ツルハ購入分 8%対象",
+        unitPrice: 13720,
+        amount: 13720,
+        taxRate: "8%",
+        registrationNumber: "T1430001010672",
+        splitGroupId: "split-157347-tsuruha",
+        note: "157347台紙より登録。領収書の8%対象額。支払区分は台紙のクレジット表記でカード。"
+      },
+      {
+        ...base,
+        id: "exp-157347-cosmo",
+        date: "2026-03-03",
+        vendor: "キタセキ北海道 札幌新川SS",
+        category: "車両費",
+        itemName: "洗車（泡＋ワックス等）",
+        unitPrice: 1000,
+        amount: 1000,
+        taxRate: "10%",
+        registrationNumber: "T1370801000359",
+        note: "157347台紙より登録。AMEX下4桁1006。車両関連洗車代。"
+      },
+      {
+        ...base,
+        id: "exp-157347-lucky",
+        date: "2026-03-03",
+        vendor: "ラッキー 篠路店",
+        category: "交際費",
+        itemName: "スーパードライ等",
+        quantity: 3,
+        unitPrice: 5046,
+        amount: 15138,
+        taxRate: "10%",
+        registrationNumber: "T4430001015181",
+        note: "157347台紙より登録。クレジット。用途は税理士確認推奨。"
+      },
+      {
+        ...base,
+        id: "exp-157347-airport-parking",
+        date: "2026-03-03",
+        vendor: "北海道エアポート 新千歳空港A駐車場",
+        category: "旅費交通費",
+        itemName: "新千歳空港A駐車場 駐車料金",
+        unitPrice: 1000,
+        amount: 1000,
+        taxRate: "10%",
+        registrationNumber: "T7430001079728",
+        note: "157347台紙より登録。JCBカード。駐車時間1時間17分。"
+      },
+      {
+        ...base,
+        id: "exp-157347-shinshin",
+        date: "2026-03-03",
+        vendor: "芯々",
+        category: "交際費",
+        itemName: "飲食代",
+        unitPrice: 67155,
+        amount: 67155,
+        taxRate: "10%",
+        registrationNumber: "T8430001067178",
+        note: "157347台紙より登録。「ご飲食代として」。日付と支払区分は台紙情報から登録。"
+      }
+    ];
   }
 
   function persist(action) {
@@ -5218,6 +5347,19 @@
       const text = await file.text();
       const imported = JSON.parse(text);
       if (imported && imported.type === "expense-append" && Array.isArray(imported.expenses)) {
+        state.expenses = Array.isArray(state.expenses) ? state.expenses : [];
+        const replaceMatches = Array.isArray(imported.replaceMatches) ? imported.replaceMatches : [];
+        let replacedCount = 0;
+        if (replaceMatches.length) {
+          const beforeCount = state.expenses.length;
+          state.expenses = state.expenses.filter((item) => !replaceMatches.some((match) => (
+            (!match.date || item.date === match.date)
+            && (!match.vendor || item.vendor === match.vendor)
+            && (!num(match.amount) || num(item.amount) === num(match.amount))
+            && (!match.taxRate || item.taxRate === match.taxRate)
+          )));
+          replacedCount = beforeCount - state.expenses.length;
+        }
         const existingIds = new Set((state.expenses || []).map((item) => item.id));
         const incomingExpenses = imported.expenses.map((item) => ({
           ...item,
@@ -5225,7 +5367,6 @@
           createdAt: item.createdAt || new Date().toISOString()
         }));
         incomingExpenses.forEach((item) => existingIds.add(item.id));
-        state.expenses = Array.isArray(state.expenses) ? state.expenses : [];
         state.expenses.push(...incomingExpenses);
         if (Array.isArray(imported.receivedDocs) && imported.receivedDocs.length) {
           state.receivedDocs = Array.isArray(state.receivedDocs) ? state.receivedDocs : [];
@@ -5235,11 +5376,11 @@
             createdAt: item.createdAt || new Date().toISOString()
           })));
         }
-        addAudit("経費追加取込", { file: file.name, count: incomingExpenses.length });
+        addAudit("経費追加取込", { file: file.name, count: incomingExpenses.length, replacedCount });
         persist("経費追加取込");
         if (incomingExpenses[0] && incomingExpenses[0].date) showFiscalYearForDate(incomingExpenses[0].date);
         render();
-        alert(`${incomingExpenses.length}件の経費を追加しました。`);
+        alert(`${incomingExpenses.length}件の経費を追加しました。${replacedCount ? `${replacedCount}件を置き換えました。` : ""}`);
         return;
       }
       const incoming = imported.state || imported;
