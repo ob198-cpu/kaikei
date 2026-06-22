@@ -866,6 +866,28 @@ tr:last-child td {
   padding: 14px;
 }
 
+.receipt-month-table {
+  padding: 14px;
+}
+
+.receipt-detail-table table {
+  min-width: 1320px;
+}
+
+.receipt-detail-table td {
+  vertical-align: middle;
+}
+
+.receipt-table-thumb {
+  background: #f7f9fc;
+}
+
+.receipt-note-cell {
+  min-width: 220px;
+  max-width: 360px;
+  white-space: normal;
+}
+
 .receipt-card {
   border: 1px solid #d7dfeb;
   border-radius: 8px;

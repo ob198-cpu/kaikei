@@ -3545,23 +3545,56 @@
           <h3>${esc(monthLabel(month))}</h3>
           <div class="actions"><span class="badge">${sorted.length}件</span><span class="badge">${yen(sum(sorted, "amount"))}</span><button class="button secondary small" data-action="month-handoff" data-month="${esc(month)}" type="button">提出HTML</button></div>
         </div>
-        <div class="receipt-list">
-          ${sorted.map((item) => `
-            <article class="receipt-card">
-              <button class="receipt-thumb" data-action="preview" data-id="${esc(item.id)}" type="button" aria-label="証憑を表示">
-                ${item.proof && item.proof.type && item.proof.type.startsWith("image/") ? `<img src="${item.proof.dataUrl}" alt="${esc(item.proof.name)}">` : `<span>${item.proof ? esc(item.proof.name) : "証憑なし"}</span>`}
-              </button>
-              <div class="receipt-card-body">
-                <div class="receipt-meta"><span>${esc(formatDate(item.date))}</span>${paymentBadge(item.paymentMethod)}</div>
-                <strong>${esc(item.vendor || item.itemName || "未入力")}</strong>
-                <div class="receipt-meta"><span>${esc(item.category)}${item.splitGroupId ? " / 税率分割" : ""}</span><strong>${yen(item.amount)}</strong></div>
-                <div class="actions">${splitProofAction(item)}${rowActions("expenses", item.id)}</div>
-              </div>
-            </article>
-          `).join("")}
+        <div class="receipt-month-table">
+          <div class="table-wrap receipt-detail-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>証憑</th>
+                  <th>日付</th>
+                  <th>取引先</th>
+                  <th>科目</th>
+                  <th>品名</th>
+                  <th class="num">個数</th>
+                  <th class="num">単価</th>
+                  <th>税区分</th>
+                  <th>T番号</th>
+                  <th>支払</th>
+                  <th class="num">金額</th>
+                  <th>メモ</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${sorted.map((item) => `<tr>
+                  <td>${receiptProofThumb(item)}</td>
+                  <td>${esc(formatDate(item.date))}</td>
+                  <td><strong>${esc(item.vendor || "未入力")}</strong></td>
+                  <td>${esc(item.category || "")}</td>
+                  <td>${esc(item.itemName || "")}</td>
+                  <td class="num">${esc(item.quantity || "")}</td>
+                  <td class="num">${item.unitPrice ? yen(item.unitPrice) : "-"}</td>
+                  <td>${esc(item.taxRate || "")} ${item.splitGroupId ? '<span class="badge warn">税率分割</span>' : ""}</td>
+                  <td>${registrationBadge(item) || "-"}</td>
+                  <td>${paymentBadge(item.paymentMethod)}</td>
+                  <td class="num"><strong>${yen(item.amount)}</strong></td>
+                  <td class="receipt-note-cell">${esc(item.note || "")}</td>
+                  <td><div class="actions">${splitProofAction(item)}${rowActions("expenses", item.id)}</div></td>
+                </tr>`).join("")}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     `;
+  }
+
+  function receiptProofThumb(item) {
+    const proof = item.proof;
+    if (proof && proof.type && proof.type.startsWith("image/")) {
+      return `<button class="receipt-thumb mini receipt-table-thumb" data-action="preview" data-id="${esc(item.id)}" type="button" aria-label="証憑を表示"><img src="${esc(proof.dataUrl)}" alt="${esc(proof.name || "証憑")}"></button>`;
+    }
+    return `<button class="receipt-thumb mini receipt-table-thumb" data-action="preview" data-id="${esc(item.id)}" type="button" aria-label="証憑を表示"><span>${proof ? esc(proof.name) : "なし"}</span></button>`;
   }
 
   function renderClosingMatrix(months, closings) {
