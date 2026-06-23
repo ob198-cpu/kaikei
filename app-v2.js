@@ -299,6 +299,7 @@
     applyBundledExpenseMigration("receipt-202603-more-boards-v1", bundledReceipt202603MoreExpenses(), "2026年3月追加領収書台紙反映2");
     applyBundledExpenseMigration("receipt-202604-board-batch-v1", bundledReceipt202604Expenses(), "2026年4月領収書台紙反映");
     applyBundledExpenseMigration("receipt-202605-board-batch-v1", bundledReceipt202605Expenses(), "2026年5月領収書台紙反映");
+    applyBundledExpenseMigration("receipt-202605-remaining-boards-v1", bundledReceipt202605RemainingExpenses(), "2026年5月追加領収書台紙反映");
   }
 
   function applyBundledExpenseMigration(migrationId, records, auditName) {
@@ -1653,6 +1654,72 @@
       { id: "exp-157396-ntt-8698", date: "2026-05-06", vendor: "NTTファイナンス株式会社", category: "通信費", itemName: "電話料金等 2026年4月請求分", amount: 8698, taxRate: "10%", registrationNumber: "", invoiceEligible: false, expenseEligibility: "eligible", expenseEligibilityReason: "業務通信費として払込受領証から確認できるため適格。", board: "157396_0.jpg", image: "157396-ntt-8698.jpg", label: "157396_NTTファイナンス8698円.jpg", note: "払込受領証。請求明細と照合推奨。" },
       { id: "exp-157396-water-1375", date: "2026-05-06", vendor: "札幌市水道事業管理者", category: "水道光熱費", itemName: "上下水道使用料", amount: 1375, taxRate: "10%", registrationNumber: "", invoiceEligible: false, expenseEligibility: "eligible", expenseEligibilityReason: "事業所利用の水道光熱費として確認できるため適格。", board: "157396_0.jpg", image: "157396-water-1375.jpg", label: "157396_札幌市水道1375円.jpg", note: "領収証書。請求明細と照合推奨。" },
       { id: "exp-157396-times-900", date: "2026-05-06", vendor: "タイムズすすきの6・6", category: "旅費交通費", itemName: "駐車料金", amount: 900, taxRate: "10%", registrationNumber: "T4010001137274", expenseEligibility: "eligible", expenseEligibilityReason: travelEligible, board: "157396_0.jpg", image: "157396-times-900.jpg", label: "157396_タイムズ駐車券900円.jpg", note: "業務移動時の駐車料金。" }
+    ];
+
+    return records.map(({ board, image, label, ...record }) => ({
+      ...base,
+      ...record,
+      unitPrice: record.unitPrice || record.amount,
+      proof: proof(board, image, label)
+    }));
+  }
+
+  function bundledReceipt202605RemainingExpenses() {
+    const createdAt = "2026-06-23T12:00:00.000+09:00";
+    const base = {
+      department: "共通費",
+      quantity: 1,
+      unit: "式",
+      paymentMethod: "card",
+      invoiceEligible: true,
+      createdAt
+    };
+    const proof = (boardFile, fileName, label) => ({
+      name: label,
+      type: "image/jpeg",
+      size: 0,
+      dataUrl: `assets/receipts/${fileName}`,
+      fullDataUrl: `assets/receipts/${boardFile}`,
+      fullName: `${boardFile.replace(".jpg", "")}_領収書台紙全体.jpg`
+    });
+    const eligible = "領収書画像から業務利用の支出として確認できるため適格。";
+    const fuelEligible = "業務車両の燃料費・車両関連費として確認できるため適格。";
+    const travelEligible = "業務移動に伴う交通費・駐車料金として確認できるため適格。";
+    const foodIneligible = "飲食代は相手先・人数・目的が未記入のため不適格。業務利用の場合は用途を追記して見直し。";
+    const unclearIneligible = "用途または内容が画像だけでは不足しているため不適格。業務用途が分かるメモを追記して見直し。";
+    const cardOnlyIneligible = "カード売上票のみで領収書・明細・T番号の確認が不足しているため不適格。";
+    const records = [
+      { id: "exp-157388-idemitsu-6887", date: "2026-05-03", vendor: "出光 セルフ石山SS", category: "燃料費", itemName: "軽油", amount: 6887, taxRate: "10%", registrationNumber: "T1430001021249", expenseEligibility: "eligible", expenseEligibilityReason: fuelEligible, board: "157388_0.jpg", image: "157388-idemitsu-6887.jpg", label: "157388_出光軽油6887円.jpg", note: "2026年5月台紙1。カード払い。" },
+      { id: "exp-157388-cosmo-600", date: "2026-05-06", vendor: "キタセキ北海道 札幌新川SS", category: "車両費", itemName: "ワックス・リヤワイパー", amount: 600, taxRate: "10%", registrationNumber: "T1370801000359", expenseEligibility: "eligible", expenseEligibilityReason: fuelEligible, board: "157388_0.jpg", image: "157388-cosmo-600.jpg", label: "157388_COSMO車両用品600円.jpg", note: "2026年5月台紙1。カード払い。" },
+      { id: "exp-157388-times-900", date: "2026-05-06", vendor: "タイムズすすきの6・6", category: "旅費交通費", itemName: "駐車料金", amount: 900, taxRate: "10%", registrationNumber: "T4010001137274", expenseEligibility: "eligible", expenseEligibilityReason: travelEligible, board: "157388_0.jpg", image: "157388-times-900.jpg", label: "157388_タイムズ駐車料金900円.jpg", note: "2026年5月台紙1。カード払い。" },
+      { id: "exp-157388-parknet-600", date: "2026-05-07", vendor: "パークネット札幌南1西12", category: "旅費交通費", itemName: "駐車料金", amount: 600, taxRate: "10%", registrationNumber: "T7140001082323", expenseEligibility: "eligible", expenseEligibilityReason: travelEligible, board: "157388_0.jpg", image: "157388-parknet-600.jpg", label: "157388_パークネット駐車料金600円.jpg", note: "2026年5月台紙1。カード払い。" },
+      { id: "exp-157388-lawson-1723", date: "2026-05-08", vendor: "ローソン札幌北24条十二丁目店", category: "交際費", itemName: "食品・飲料購入", amount: 1723, taxRate: "8%", registrationNumber: "T8430002042196", expenseEligibility: "ineligible", expenseEligibilityReason: foodIneligible, board: "157388_0.jpg", image: "157388-lawson-1723.jpg", label: "157388_ローソン1723円.jpg", note: "2026年5月台紙1。飲食・食品用途は相手先と目的の追記が必要。" },
+      { id: "exp-157389-polo-33440", date: "2026-05-09", vendor: "Polo Ralph Lauren Factory Store", category: "消耗品費", itemName: "衣類 ジャケット", amount: 33440, taxRate: "10%", registrationNumber: "T5011001059326", expenseEligibility: "ineligible", expenseEligibilityReason: "衣類購入は業務用途が未記入のため不適格。制服・撮影衣装等であれば用途を追記して見直し。", board: "157389_0.jpg", image: "157389-polo-33440.jpg", label: "157389_POLO衣類33440円.jpg", note: "2026年5月台紙2。カード払い。" },
+      { id: "exp-157389-pear-8", date: "2026-05-09", vendor: "パールモンドール", category: "交際費", itemName: "菓子代 8%対象", amount: 5950, taxRate: "8%", registrationNumber: "T5430001020395", expenseEligibility: "ineligible", expenseEligibilityReason: foodIneligible, splitGroupId: "split-157389-pear", board: "157389_0.jpg", image: "157389-pear-6170.jpg", label: "157389_パールモンドール8%対象5950円.jpg", note: "8%と10%が混ざるため税率別に分割登録。" },
+      { id: "exp-157389-pear-10", date: "2026-05-09", vendor: "パールモンドール", category: "交際費", itemName: "ナンバーキャンドル 10%対象", amount: 220, taxRate: "10%", registrationNumber: "T5430001020395", expenseEligibility: "ineligible", expenseEligibilityReason: foodIneligible, splitGroupId: "split-157389-pear", board: "157389_0.jpg", image: "157389-pear-6170.jpg", label: "157389_パールモンドール10%対象220円.jpg", note: "8%と10%が混ざるため税率別に分割登録。" },
+      { id: "exp-157390-lacoste-18480", date: "2026-05-09", vendor: "LACOSTE 三井アウトレットパーク札幌北広島店", category: "消耗品費", itemName: "衣類", amount: 18480, taxRate: "10%", registrationNumber: "T8011001047745", expenseEligibility: "ineligible", expenseEligibilityReason: "衣類購入は業務用途が未記入のため不適格。業務用であれば用途を追記して見直し。", board: "157390_0.jpg", image: "157390-lacoste-18480.jpg", label: "157390_LACOSTE18480円.jpg", note: "2026年5月台紙3。157388_0.jpgにカード売上票あり。二重計上防止のため領収書側で登録。" },
+      { id: "exp-157390-mcdonalds-1300", date: "2026-05-12", vendor: "マクドナルド 藤野川店", category: "交際費", itemName: "飲食代", amount: 1300, taxRate: "10%", registrationNumber: "T8430001074604", expenseEligibility: "ineligible", expenseEligibilityReason: foodIneligible, board: "157390_0.jpg", image: "157390-mcdonalds-1300.jpg", label: "157390_マクドナルド1300円.jpg", note: "相手先・人数・目的の追記が必要。" },
+      { id: "exp-157390-miyanomori-3000", date: "2026-05-12", vendor: "宮の森珈琲 山の手店", category: "交際費", itemName: "飲食代", amount: 3000, taxRate: "不明", registrationNumber: "", invoiceEligible: false, expenseEligibility: "ineligible", expenseEligibilityReason: foodIneligible, board: "157390_0.jpg", image: "157390-miyanomori-3000.jpg", label: "157390_宮の森珈琲3000円.jpg", note: "カード売上票・領収証一部のみ。T番号と利用目的の確認が必要。" },
+      { id: "exp-157392-times-5600", date: "2026-05-13", vendor: "タイムズ北2西3", category: "旅費交通費", itemName: "駐車料金", amount: 5600, taxRate: "10%", registrationNumber: "T4010001137274", expenseEligibility: "eligible", expenseEligibilityReason: travelEligible, board: "157392_0.jpg", image: "157392-times-5600.jpg", label: "157392_タイムズ駐車料金5600円.jpg", note: "157391_0.jpgと同じ台紙の写り違い。見やすい157392_0.jpgで登録。" },
+      { id: "exp-157392-cosmo-800", date: "2026-05-14", vendor: "キタセキ北海道 札幌新川SS", category: "車両費", itemName: "ワックス・リヤワイパー", amount: 800, taxRate: "10%", registrationNumber: "T1370801000359", expenseEligibility: "eligible", expenseEligibilityReason: fuelEligible, board: "157392_0.jpg", image: "157392-cosmo-800.jpg", label: "157392_COSMO車両用品800円.jpg", note: "157391_0.jpgと同じ台紙の写り違い。見やすい157392_0.jpgで登録。" },
+      { id: "exp-157392-escon-fullswing-10", date: "2026-05-16", vendor: "ES CON FIELD HOKKAIDO Full Swing", category: "交際費", itemName: "飲食代 10%対象", amount: 650, taxRate: "10%", registrationNumber: "T2370001010208", expenseEligibility: "ineligible", expenseEligibilityReason: foodIneligible, splitGroupId: "split-157392-escon-fullswing", board: "157392_0.jpg", image: "157392-escon-fullswing-1150.jpg", label: "157392_ES CON飲食10%650円.jpg", note: "10%と8%が混ざるため税率別に分割登録。" },
+      { id: "exp-157392-escon-fullswing-8", date: "2026-05-16", vendor: "ES CON FIELD HOKKAIDO Full Swing", category: "交際費", itemName: "飲食代 8%対象", amount: 500, taxRate: "8%", registrationNumber: "T2370001010208", expenseEligibility: "ineligible", expenseEligibilityReason: foodIneligible, splitGroupId: "split-157392-escon-fullswing", board: "157392_0.jpg", image: "157392-escon-fullswing-1150.jpg", label: "157392_ES CON飲食8%500円.jpg", note: "10%と8%が混ざるため税率別に分割登録。" },
+      { id: "exp-157392-escon-raizan-12320", date: "2026-05-16", vendor: "焼肉と韓国料理 羅山", category: "交際費", itemName: "飲食代", amount: 12320, taxRate: "10%", registrationNumber: "T9430001058283", expenseEligibility: "ineligible", expenseEligibilityReason: foodIneligible, board: "157392_0.jpg", image: "157392-escon-raizan-12320.jpg", label: "157392_羅山飲食12320円.jpg", note: "相手先・人数・目的の追記が必要。" },
+      { id: "exp-157392-fighters-12900", date: "2026-05-16", vendor: "FIGHTERS OFFICIAL STORE", category: "消耗品費", itemName: "物販購入", amount: 12900, taxRate: "不明", registrationNumber: "T3011003008357", expenseEligibility: "ineligible", expenseEligibilityReason: unclearIneligible, board: "157392_0.jpg", image: "157392-fighters-12900.jpg", label: "157392_FIGHTERS12900円.jpg", note: "購入品と業務用途の確認が必要。" },
+      { id: "exp-157393-okamoto-6335", date: "2026-05-18", vendor: "オカモト セルフ恵庭むつみ野", category: "燃料費", itemName: "レギュラーガソリン", amount: 6335, taxRate: "10%", registrationNumber: "T4460101000213", expenseEligibility: "eligible", expenseEligibilityReason: fuelEligible, board: "157393_0.jpg", image: "157393-okamoto-6335.jpg", label: "157393_オカモト燃料6335円.jpg", note: "2026年5月台紙5。カード払い。" },
+      { id: "exp-157393-okamoto-5000", date: "2026-05-19", vendor: "オカモト セルフ恵庭むつみ野", category: "燃料費", itemName: "軽油", amount: 5000, taxRate: "10%", registrationNumber: "T4460101000213", paymentMethod: "cash", expenseEligibility: "eligible", expenseEligibilityReason: fuelEligible, board: "157393_0.jpg", image: "157393-okamoto-5000.jpg", label: "157393_オカモト軽油5000円.jpg", note: "現金払い。ENEOSお釣引換券は経費ではないため未登録。" },
+      { id: "exp-157393-times-2000", date: "2026-05-20", vendor: "タイムズすすきの6・6", category: "旅費交通費", itemName: "駐車料金", amount: 2000, taxRate: "10%", registrationNumber: "T4010001137274", expenseEligibility: "eligible", expenseEligibilityReason: travelEligible, board: "157393_0.jpg", image: "157393-times-2000.jpg", label: "157393_タイムズ駐車料金2000円.jpg", note: "カード払い。" },
+      { id: "exp-157393-long-3400", date: "2026-05-20", vendor: "Long 定額代行", category: "旅費交通費", itemName: "運転代行代", amount: 3400, taxRate: "不明", registrationNumber: "T5430001086651", expenseEligibility: "eligible", expenseEligibilityReason: "業務移動に伴う運転代行代として台紙上で確認できるため適格。私用利用の場合は不適格へ変更。", board: "157393_0.jpg", image: "157393-long-3400.jpg", label: "157393_Long運転代行3400円.jpg", note: "業務移動目的の確認メモがあると安全。" },
+      { id: "exp-157394-dining-57400", date: "2026-05-22", vendor: "飲食店名未確認", category: "交際費", itemName: "飲食代", amount: 57400, taxRate: "10%", registrationNumber: "T6430101044787", expenseEligibility: "ineligible", expenseEligibilityReason: foodIneligible, board: "157394_0.jpg", image: "157394-dining-57400.jpg", label: "157394_飲食代57400円.jpg", note: "店舗名・相手先・人数・目的の確認が必要。高額飲食のため税理士確認推奨。" },
+      { id: "exp-157394-yamada-3490", date: "2026-05-22", vendor: "ヤマダデンキ Tecc LIFE SELECT 札幌本店", category: "消耗品費", itemName: "備品・消耗品", amount: 3490, taxRate: "10%", registrationNumber: "T20700010036729", expenseEligibility: "eligible", expenseEligibilityReason: eligible, board: "157394_0.jpg", image: "157394-yamada-3490.jpg", label: "157394_ヤマダデンキ3490円.jpg", note: "業務用備品として登録。用途詳細があれば追記。" },
+      { id: "exp-157394-card-122880", date: "2026-05-22", vendor: "カード売上票 加盟店名未確認", category: "雑費", itemName: "カード売上票のみ", amount: 122880, taxRate: "不明", registrationNumber: "", invoiceEligible: false, expenseEligibility: "ineligible", expenseEligibilityReason: cardOnlyIneligible, board: "157394_0.jpg", image: "157394-card-122880.jpg", label: "157394_カード売上票122880円.jpg", note: "領収書または明細確認が必要。二重計上注意。" },
+      { id: "exp-157394-jingisukan-31405", date: "2026-05-20", vendor: "焼肉神楽 すすきの本店", category: "交際費", itemName: "飲食代", amount: 31405, taxRate: "10%", registrationNumber: "T2430001094855", expenseEligibility: "ineligible", expenseEligibilityReason: foodIneligible, board: "157394_0.jpg", image: "157394-jingisukan-31405.jpg", label: "157394_焼肉神楽31405円.jpg", note: "相手先・人数・目的の追記が必要。" },
+      { id: "exp-157395-mobius-7551", date: "2026-05-28", vendor: "モビウス石油", category: "燃料費", itemName: "軽油", amount: 7551, taxRate: "10%", registrationNumber: "T5460001000526", expenseEligibility: "eligible", expenseEligibilityReason: fuelEligible, board: "157395_0.jpg", image: "157395-mobius-7551.jpg", label: "157395_モビウス石油7551円.jpg", note: "2026年5月台紙7。カード払い。" },
+      { id: "exp-157395-luckymart-2276", date: "2026-05-25", vendor: "LUCKYmart 幌向店", category: "交際費", itemName: "食品・飲料購入", amount: 2276, taxRate: "8%", registrationNumber: "T1430001015181", expenseEligibility: "ineligible", expenseEligibilityReason: foodIneligible, board: "157395_0.jpg", image: "157395-luckymart-2276.jpg", label: "157395_LUCKYmart2276円.jpg", note: "飲食・食品用途は相手先と目的の追記が必要。" },
+      { id: "exp-157395-parknet-1200", date: "2026-05-26", vendor: "パークネット札幌すすきの南5西6", category: "旅費交通費", itemName: "駐車料金", amount: 1200, taxRate: "10%", registrationNumber: "T7140001082323", expenseEligibility: "eligible", expenseEligibilityReason: travelEligible, board: "157395_0.jpg", image: "157395-parknet-1200.jpg", label: "157395_パークネット駐車料金1200円.jpg", note: "カード払い。" },
+      { id: "exp-157395-lawson-2904", date: "2026-05-26", vendor: "ローソン", category: "交際費", itemName: "食品・飲料購入", amount: 2904, taxRate: "8%", registrationNumber: "T8430001062721", expenseEligibility: "ineligible", expenseEligibilityReason: foodIneligible, board: "157395_0.jpg", image: "157395-lawson-2904.jpg", label: "157395_ローソン2904円.jpg", note: "飲食・食品用途は相手先と目的の追記が必要。" },
+      { id: "exp-157395-cardnet-18590", date: "2026-05-28", vendor: "CARDNET加盟店 カード売上票", category: "雑費", itemName: "カード売上票のみ", amount: 18590, taxRate: "不明", registrationNumber: "", invoiceEligible: false, expenseEligibility: "ineligible", expenseEligibilityReason: cardOnlyIneligible, board: "157395_0.jpg", image: "157395-cardnet-18590.jpg", label: "157395_CARDNET18590円.jpg", note: "領収書または明細確認が必要。二重計上注意。" },
+      { id: "exp-157395-gmofg-16040", date: "2026-05-28", vendor: "GMO-FG加盟店 カード売上票", category: "雑費", itemName: "カード売上票のみ", amount: 16040, taxRate: "不明", registrationNumber: "", invoiceEligible: false, expenseEligibility: "ineligible", expenseEligibilityReason: cardOnlyIneligible, board: "157395_0.jpg", image: "157395-gmofg-16040.jpg", label: "157395_GMO-FG16040円.jpg", note: "領収書または明細確認が必要。二重計上注意。" }
     ];
 
     return records.map(({ board, image, label, ...record }) => ({
