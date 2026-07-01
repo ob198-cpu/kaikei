@@ -2977,6 +2977,7 @@
           <strong>${esc(sourceTitle)}</strong>
           <span class="badge ${missingCount || warnings.length ? "warn" : "good"}">${missingCount ? `未記入 ${missingCount}` : warnings.length ? `要確認 ${warnings.length}` : "下書きOK"}</span>
         </div>
+        ${renderLocalOcrCandidateProof(result)}
         <div class="local-ocr-result-grid">
           ${fields.map(([key, label]) => `
             <div>
@@ -3022,6 +3023,21 @@
     return esc(value);
   }
 
+  function renderLocalOcrCandidateProof(result) {
+    const proof = result && result.proof;
+    if (!proof || !proof.dataUrl || !String(proof.type || "").startsWith("image/")) return "";
+    return `
+      <div class="local-ocr-proof-preview">
+        <a class="proof-image-link" href="${esc(proof.dataUrl)}" target="_blank" rel="noopener" title="画像を拡大">
+          <img src="${esc(proof.dataUrl)}" alt="${esc(proof.name || "OCR image")}">
+        </a>
+        ${proof.fullDataUrl ? `
+          <a class="button secondary small" href="${esc(proof.fullDataUrl)}" target="_blank" rel="noopener">台紙全体を開く</a>
+        ` : ""}
+      </div>
+    `;
+  }
+
   async function runLocalOcrFromFile(file, report) {
     if (window.Tesseract && typeof window.Tesseract.recognize === "function") {
       return runTesseractLocalOcr(file, report);
@@ -3058,7 +3074,31 @@
 
   async function runTesseractLocalOcr(file, report) {
     const prepared = await prepareLocalOcrImage(file, report);
-    const result = await window.Tesseract.recognize(prepared.image || file, "jpn+eng", {
+    const whole = await recognizeTesseractLocalOcrImage(prepared.image || file, report, "whole");
+    const tileCandidates = shouldRunLocalOcrTiles(prepared.image, whole.text)
+      ? await buildLocalOcrTileCandidates(prepared.image, file.name, report)
+      : [];
+    const textParts = [whole.text || ""]
+      .concat(tileCandidates.map((candidate) => `--- ${candidate.label || "tile"} ---\n${candidate.text || ""}`))
+      .filter((part) => clean(part));
+    return {
+      text: textParts.join("\n\n"),
+      lines: whole.lines || [],
+      candidates: tileCandidates
+    };
+  }
+
+  async function recognizeTesseractLocalOcrImage(image, report, label = "OCR") {
+    const result = await window.Tesseract.recognize(image, "jpn+eng", localTesseractOptions(report, label));
+    const data = result && result.data ? result.data : {};
+    return {
+      text: data.text || "",
+      lines: extractTesseractLines(data)
+    };
+  }
+
+  function localTesseractOptions(report, label) {
+    return {
       workerPath: "vendor/tesseract/worker.min.js",
       corePath: "vendor/tesseract/core",
       langPath: "vendor/tesseract/lang-data",
@@ -3068,13 +3108,111 @@
       logger(message) {
         if (!report || !message) return;
         const progress = typeof message.progress === "number" ? ` ${Math.round(message.progress * 100)}%` : "";
-        report(`${message.status || "OCR"}${progress}`);
+        report(`${label}: ${message.status || "OCR"}${progress}`);
+      }
+    };
+  }
+
+  function shouldRunLocalOcrTiles(image, text) {
+    if (!image || image.tagName !== "CANVAS") return false;
+    const longest = Math.max(image.width || 0, image.height || 0);
+    const shortest = Math.min(image.width || 0, image.height || 0);
+    if (longest < 1700 || shortest < 1100) return false;
+    const source = normalizeOcrText(text || "");
+    return source.length >= 40 || (image.width * image.height) >= 2200000;
+  }
+
+  function countLocalOcrReceiptSignals(text) {
+    return normalizeOcrText(text || "")
+      .split("\n")
+      .filter((line) => isLocalOcrReceiptStartLine(line))
+      .length;
+  }
+
+  async function buildLocalOcrTileCandidates(canvas, fileName, report) {
+    const tiles = createLocalOcrTiles(canvas, fileName);
+    const candidates = [];
+    for (let index = 0; index < tiles.length; index += 1) {
+      const tile = tiles[index];
+      if (report) report(`split ${index + 1}/${tiles.length}`);
+      const result = await recognizeTesseractLocalOcrImage(tile.image, report, tile.label);
+      const text = cleanMultiline(result.text || "");
+      if (localOcrReceiptEvidenceScore(text) < 2) continue;
+      candidates.push({
+        label: tile.label,
+        text,
+        proof: tile.proof,
+        fileName: `${fileName || "image"} / ${tile.label}`,
+        sourceKind: "local OCR split"
+      });
+    }
+    return dedupeLocalOcrPayloadCandidates(candidates);
+  }
+
+  function createLocalOcrTiles(canvas, fileName) {
+    if (!canvas || canvas.tagName !== "CANVAS") return [];
+    const layouts = [[3, 2], [2, 3]];
+    const overlapRatio = 0.08;
+    const tiles = [];
+    layouts.forEach(([columns, rows]) => {
+      const tileWidth = canvas.width / columns;
+      const tileHeight = canvas.height / rows;
+      for (let row = 0; row < rows; row += 1) {
+        for (let column = 0; column < columns; column += 1) {
+          const baseX = column * tileWidth;
+          const baseY = row * tileHeight;
+          const overlapX = tileWidth * overlapRatio;
+          const overlapY = tileHeight * overlapRatio;
+          const sourceX = Math.max(0, Math.floor(baseX - overlapX));
+          const sourceY = Math.max(0, Math.floor(baseY - overlapY));
+          const sourceW = Math.min(canvas.width - sourceX, Math.ceil(tileWidth + overlapX * 2));
+          const sourceH = Math.min(canvas.height - sourceY, Math.ceil(tileHeight + overlapY * 2));
+          const tileCanvas = document.createElement("canvas");
+          tileCanvas.width = Math.max(1, sourceW);
+          tileCanvas.height = Math.max(1, sourceH);
+          const context = tileCanvas.getContext("2d", { willReadFrequently: true });
+          if (!context) continue;
+          context.fillStyle = "#fff";
+          context.fillRect(0, 0, tileCanvas.width, tileCanvas.height);
+          context.drawImage(canvas, sourceX, sourceY, sourceW, sourceH, 0, 0, tileCanvas.width, tileCanvas.height);
+          if (localOcrTileLooksBlank(tileCanvas)) continue;
+          const label = `split ${columns}x${rows}-${row + 1}-${column + 1}`;
+          tiles.push({
+            label,
+            image: tileCanvas,
+            proof: makeLocalOcrCanvasProof(tileCanvas, `${fileName || "receipt"}_${label}.jpg`)
+          });
+        }
       }
     });
-    const data = result && result.data ? result.data : {};
+    return tiles;
+  }
+
+  function localOcrTileLooksBlank(canvas) {
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) return false;
+    const step = Math.max(4, Math.floor(Math.min(canvas.width, canvas.height) / 180));
+    let samples = 0;
+    let dark = 0;
+    for (let y = 0; y < canvas.height; y += step) {
+      const data = context.getImageData(0, y, canvas.width, 1).data;
+      for (let x = 0; x < canvas.width; x += step) {
+        const index = x * 4;
+        const gray = Math.round((data[index] * 0.299) + (data[index + 1] * 0.587) + (data[index + 2] * 0.114));
+        samples += 1;
+        if (gray < 210) dark += 1;
+      }
+    }
+    return samples > 0 && dark / samples < 0.015;
+  }
+
+  function makeLocalOcrCanvasProof(canvas, name) {
+    const dataUrl = canvas.toDataURL("image/jpeg", 0.84);
     return {
-      text: data.text || "",
-      lines: extractTesseractLines(data)
+      name,
+      type: "image/jpeg",
+      size: Math.round((dataUrl.length * 3) / 4),
+      dataUrl
     };
   }
 
@@ -3174,7 +3312,12 @@
     const ocrPayload = typeof payload === "string" ? { text: payload } : payload || {};
     const text = cleanMultiline(ocrPayload.text || "");
     const candidateTexts = splitLocalOcrCandidateTexts(text, ocrPayload);
-    const candidates = candidateTexts.map((candidate, index) => buildLocalOcrCandidate(candidate.text || candidate, meta, index, candidate.label));
+    const candidates = candidateTexts.map((candidate, index) => buildLocalOcrCandidate(
+      candidate.text || candidate,
+      localOcrCandidateMeta(candidate, meta),
+      index,
+      candidate.label
+    ));
     const primary = candidates[0] || buildLocalOcrCandidate(text, meta, 0, "");
     const missingFields = primary.missingFields || [];
     return {
@@ -3192,6 +3335,26 @@
       activeIndex: 0,
       needsCandidateReview: candidates.length > 1 || hasMultipleReceiptSignals(text)
     };
+  }
+
+  function localOcrCandidateMeta(candidate, meta = {}) {
+    if (!candidate || typeof candidate === "string") return meta;
+    return {
+      ...meta,
+      sourceKind: candidate.sourceKind || meta.sourceKind,
+      fileName: candidate.fileName || meta.fileName || "",
+      proof: attachLocalOcrSourceProof(candidate.proof, meta.proof) || meta.proof || null
+    };
+  }
+
+  function attachLocalOcrSourceProof(proof, sourceProof) {
+    if (!proof) return null;
+    const next = { ...proof };
+    if (sourceProof && sourceProof.dataUrl && !next.fullDataUrl) {
+      next.fullDataUrl = sourceProof.fullDataUrl || sourceProof.dataUrl;
+      next.fullName = sourceProof.originalName || sourceProof.name || "";
+    }
+    return next;
   }
 
   function buildLocalOcrCandidate(text, meta = {}, index = 0, label = "") {
@@ -3250,11 +3413,39 @@
   }
 
   function splitLocalOcrCandidateTexts(text, payload = {}) {
+    const payloadCandidates = splitLocalOcrByPayloadCandidates(payload.candidates || []);
+    if (payloadCandidates.length) return payloadCandidates;
     const geometryCandidates = splitLocalOcrByLineGeometry(payload.lines || []);
     if (geometryCandidates.length > 1) return geometryCandidates;
     const textCandidates = splitLocalOcrByTextMarkers(text);
     if (textCandidates.length > 1) return textCandidates;
     return [{ label: "全体", text }];
+  }
+
+  function splitLocalOcrByPayloadCandidates(candidates) {
+    if (!Array.isArray(candidates) || !candidates.length) return [];
+    return dedupeLocalOcrPayloadCandidates(candidates)
+      .filter((candidate) => localOcrReceiptEvidenceScore(candidate.text || "") >= 2)
+      .map((candidate, index) => ({
+        ...candidate,
+        label: candidate.label || `split ${index + 1}`
+      }));
+  }
+
+  function dedupeLocalOcrPayloadCandidates(candidates) {
+    const seen = new Set();
+    const results = [];
+    (candidates || []).forEach((candidate) => {
+      const text = cleanMultiline(candidate && candidate.text || "");
+      if (!text) return;
+      const fingerprint = normalizeOcrText(text)
+        .replace(/[^\dA-Za-z一-龠ぁ-んァ-ヶー]/g, "")
+        .slice(0, 180);
+      if (!fingerprint || seen.has(fingerprint)) return;
+      seen.add(fingerprint);
+      results.push({ ...candidate, text });
+    });
+    return results;
   }
 
   function splitLocalOcrByLineGeometry(lines) {

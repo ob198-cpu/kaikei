@@ -484,6 +484,20 @@ h3 {
   gap: 8px;
 }
 
+.local-ocr-proof-preview {
+  display: grid;
+  gap: 8px;
+}
+
+.local-ocr-proof-preview img {
+  width: 100%;
+  max-height: 210px;
+  object-fit: contain;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #f5f7fa;
+}
+
 .local-ocr-result-grid > div {
   min-width: 0;
   padding: 10px;
