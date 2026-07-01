@@ -3141,6 +3141,7 @@
       candidates.push({
         label: tile.label,
         text,
+        lines: result.lines || [],
         proof: tile.proof,
         fileName: `${fileName || "image"} / ${tile.label}`,
         sourceKind: "local OCR split"
@@ -3424,7 +3425,23 @@
 
   function splitLocalOcrByPayloadCandidates(candidates) {
     if (!Array.isArray(candidates) || !candidates.length) return [];
-    return dedupeLocalOcrPayloadCandidates(candidates)
+    const expanded = [];
+    dedupeLocalOcrPayloadCandidates(candidates).forEach((candidate, index) => {
+      const geometryBlocks = splitLocalOcrByLineGeometry(candidate.lines || []);
+      const textBlocks = geometryBlocks.length > 1 ? geometryBlocks : splitLocalOcrByTextMarkers(candidate.text || "");
+      if (textBlocks.length > 1) {
+        textBlocks.forEach((block, blockIndex) => {
+          expanded.push({
+            ...candidate,
+            text: block.text || "",
+            label: `${candidate.label || `split ${index + 1}`} / ${block.label || `候補${blockIndex + 1}`}`
+          });
+        });
+        return;
+      }
+      expanded.push(candidate);
+    });
+    return dedupeLocalOcrPayloadCandidates(expanded)
       .filter((candidate) => localOcrReceiptEvidenceScore(candidate.text || "") >= 2)
       .map((candidate, index) => ({
         ...candidate,
@@ -3548,6 +3565,29 @@
     const starts = source.split("\n").filter((line) => isLocalOcrReceiptStartLine(line)).length;
     const totals = source.split("\n").filter((line) => /合計|小計|領収金額|請求金額|クレジット|現金|支払/.test(line) && extractYenNumbers(line).length).length;
     return starts >= 3 || totals >= 3;
+  }
+
+  function localOcrCandidateLooksMerged(text) {
+    const source = normalizeOcrText(text);
+    if (!source) return false;
+    const starts = countLocalOcrReceiptSignals(source);
+    const strongAmounts = new Set(
+      collectOcrMoneyCandidates(source)
+        .filter((candidate) => candidate.score >= 5)
+        .map((candidate) => candidate.value)
+    ).size;
+    const upper = source.toUpperCase();
+    const vendorGroups = [
+      ["ENEOS"],
+      ["COSMO"],
+      ["LAWSON"],
+      ["LACOSTE"],
+      ["LUCKY"],
+      ["FIGHTERS"],
+      ["ES CON", "FIELD"],
+      ["DCM"]
+    ].filter((group) => group.some((word) => upper.includes(word))).length;
+    return starts >= 3 || vendorGroups >= 2 || strongAmounts >= 3;
   }
 
   function localOcrCandidateCount(result) {
@@ -3806,6 +3846,16 @@
     const next = { ...(fields || {}) };
     const moneyCandidates = collectOcrMoneyCandidates(source);
     const paymentSignals = detectOcrPaymentSignals(source);
+    if (localOcrCandidateLooksMerged(source)) {
+      next.date = "";
+      next.vendor = "";
+      next.amount = "";
+      next.unitPrice = "";
+      next.paymentMethod = "";
+      next.taxRate = "";
+      next.registrationNumber = "";
+      return next;
+    }
     if (next.date && localOcrDateNeedsManualEntry(next.date, source)) next.date = "";
     if (next.amount && !localOcrAmountIsReliable(source, next.amount, moneyCandidates)) {
       next.amount = "";
@@ -3886,6 +3936,9 @@
     const amount = num(fields.amount);
     if (hasMultipleReceiptSignals(source) || Number(context.candidateIndex) > 0) {
       warnings.push("台紙分割候補です。元画像でこの候補が1枚のレシートか確認してください。");
+    }
+    if (localOcrCandidateLooksMerged(source)) {
+      warnings.push("複数レシートが1候補に混ざっている可能性があります。この候補は自動登録せず、切り出し候補か元画像で確認してください。");
     }
     if (!fields.date) {
       warnings.push("日付が未記入です。2026を2076/2028などに誤読しやすいため原本確認が必要です。");
