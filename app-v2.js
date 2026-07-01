@@ -3153,6 +3153,7 @@
   function createLocalOcrTiles(canvas, fileName) {
     if (!canvas || canvas.tagName !== "CANVAS") return [];
     const layouts = [[3, 2], [2, 3]];
+    if (Math.max(canvas.width || 0, canvas.height || 0) >= 2400) layouts.push([3, 3]);
     const overlapRatio = 0.08;
     const tiles = [];
     layouts.forEach(([columns, rows]) => {
@@ -3607,6 +3608,10 @@
     const source = normalizeOcrText(text);
     if (!source) return false;
     const starts = countLocalOcrReceiptSignals(source);
+    const totalLines = source.split("\n").filter((line) => {
+      const hasTotalWord = /合計|総計|小計|領収|請求|支払|支払い|現金|クレジット|カード|total|amount|cash|credit/i.test(line);
+      return hasTotalWord && extractYenNumbers(line, { loose: true }).length;
+    }).length;
     const strongAmounts = new Set(
       collectOcrMoneyCandidates(source)
         .filter((candidate) => candidate.score >= 5)
@@ -3623,7 +3628,7 @@
       ["ES CON", "FIELD"],
       ["DCM"]
     ].filter((group) => group.some((word) => upper.includes(word))).length;
-    return starts >= 3 || vendorGroups >= 2 || strongAmounts >= 3;
+    return starts >= 3 || vendorGroups >= 2 || strongAmounts >= 3 || (starts >= 2 && strongAmounts >= 2 && totalLines >= 2);
   }
 
   function localOcrCandidateCount(result) {
@@ -3736,6 +3741,8 @@
           if (/領収|発行|利用|日付|売上|精算|入庫|出庫|取引|請求|納品/.test(line)) score += 1;
           if (/期限|有効|承認|会員|登録|TEL|電話|番号|No\.?/i.test(line)) score -= 2;
           if (/207[0-9]|202[89]/.test(rawYear)) score -= 4;
+          if (/TEL|No\.?|AID|APL|IC|CARD|JCB|VISA|MASTER|AMEX|会員|登録|承認|期限|有効|次回|クーポン|ポイント|端末|番号|電話/i.test(line)) score -= 4;
+          if (/駐車|入庫|出庫|精算|領収|発行|取引|売上|利用/.test(line)) score += 1;
           candidates.push({ value, line, lineIndex, score });
         }
         western = westernRegex.exec(line);
@@ -3749,8 +3756,8 @@
     const m = Number(month);
     const d = Number(day);
     const currentYear = Number(new Date().getFullYear());
-    if (y >= 2070 && y <= 2079) y = 2020 + (y % 10);
-    if (y > currentYear + 2 || y < 2000) return "";
+    if (y >= 2070 && y <= 2079) return "";
+    if (y > currentYear + 1 || y < 2000) return "";
     if (!y || !m || !d || m > 12 || d > 31) return "";
     const parsed = new Date(y, m - 1, d);
     if (parsed.getFullYear() !== y || parsed.getMonth() !== m - 1 || parsed.getDate() !== d) return "";
@@ -4058,6 +4065,8 @@
     if (/小計|税抜|対象額|税率別|内訳/.test(source)) score -= 2;
     if (/消費税|内税|外税|税額|お釣|おつり|釣銭|お預|預り|ポイント|割引|値引|クーポン|TEL|電話|登録番号|T\d{10,}|No\.?|伝票|時刻|時間|駐車時間|承認|会員|端末|バーコード|個|点|枚|L\/|km|リットル/i.test(source)) score -= strongTotal ? 2 : 5;
     if (/お釣|おつり|釣銭|お預|預り|ポイント|承認|会員|端末/.test(source) && !strongTotal) score -= 3;
+    if (/TEL|FAX|No\.?|AID|APL|IC|端末|承認|伝票|会員|登録|電話|番号|入庫|出庫|駐車時間|時刻/i.test(source) && !strongTotal) score -= 5;
+    if (/(?:\d+(?:\.\d+)?)\s*(?:L|l|リットル|km)/i.test(source) && !/合計|総計|領収|請求|支払|支払い|現金|クレジット|カード|total|amount|cash|credit/i.test(source)) score -= 4;
     if (value < 100) score -= 3;
     return score;
   }
