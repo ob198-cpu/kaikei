@@ -520,6 +520,24 @@ h3 {
   font-weight: 900;
 }
 
+.ocr-warning-list {
+  padding: 10px;
+  border: 1px solid #f1d48a;
+  border-radius: 6px;
+  background: #fff8e5;
+  color: #8a5a00;
+  font-weight: 800;
+}
+
+.ocr-warning-list ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+
+.ocr-warning-list li + li {
+  margin-top: 4px;
+}
+
 .local-ocr-result-actions {
   display: flex;
   flex-wrap: wrap;

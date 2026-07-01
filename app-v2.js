@@ -2849,7 +2849,7 @@
           lastLocalOcrResult = mergeLocalOcrResults(results);
           saveLocalOcrExtract(lastLocalOcrResult);
           syncLocalOcrResult();
-          setLocalOcrMessage(localOcrDoneMessage(lastLocalOcrResult), lastLocalOcrResult.missingFields.length || localOcrCandidateCount(lastLocalOcrResult) > 1 ? "warn" : "good");
+          setLocalOcrMessage(localOcrDoneMessage(lastLocalOcrResult), lastLocalOcrResult.missingFields.length || localOcrCandidateCount(lastLocalOcrResult) > 1 || localOcrWarningCount(lastLocalOcrResult) ? "warn" : "good");
         } catch (error) {
           console.error(error);
           setLocalOcrMessage(error.message || "ローカルOCRを実行できませんでした。", "bad");
@@ -2873,7 +2873,7 @@
         });
         saveLocalOcrExtract(lastLocalOcrResult);
         syncLocalOcrResult();
-        setLocalOcrMessage(localOcrDoneMessage(lastLocalOcrResult), lastLocalOcrResult.missingFields.length || localOcrCandidateCount(lastLocalOcrResult) > 1 ? "warn" : "good");
+        setLocalOcrMessage(localOcrDoneMessage(lastLocalOcrResult), lastLocalOcrResult.missingFields.length || localOcrCandidateCount(lastLocalOcrResult) > 1 || localOcrWarningCount(lastLocalOcrResult) ? "warn" : "good");
       });
     }
 
@@ -2961,12 +2961,13 @@
       ["registrationNumber", "T番号"]
     ];
     const missingCount = (result.missingFields || []).length;
+    const warnings = result.warnings || [];
     const sourceTitle = [result.candidateLabel || result.sourceKind || "画像OCR", result.fileName].filter(Boolean).join(" / ");
     return `
       <div class="local-ocr-result-card ${options.active ? "is-active" : ""}">
         <div class="local-ocr-result-head">
           <strong>${esc(sourceTitle)}</strong>
-          <span class="badge ${missingCount ? "warn" : "good"}">${missingCount ? `未記入 ${missingCount}` : "下書きOK"}</span>
+          <span class="badge ${missingCount || warnings.length ? "warn" : "good"}">${missingCount ? `未記入 ${missingCount}` : warnings.length ? `要確認 ${warnings.length}` : "下書きOK"}</span>
         </div>
         <div class="local-ocr-result-grid">
           ${fields.map(([key, label]) => `
@@ -2978,6 +2979,14 @@
         </div>
         ${Array.isArray(result.missingFields) && result.missingFields.length ? `
           <div class="missing-alert">未記入: ${esc(result.missingFields.join("、"))}</div>
+        ` : ""}
+        ${warnings.length ? `
+          <div class="ocr-warning-list">
+            <strong>確認が必要</strong>
+            <ul>
+              ${warnings.map((warning) => `<li>${esc(warning)}</li>`).join("")}
+            </ul>
+          </div>
         ` : ""}
         ${result.fields.split10Amount || result.fields.split8Amount ? `
           <div class="local-ocr-split-note">
@@ -3112,6 +3121,7 @@
       text,
       fields: primary.fields,
       missingFields,
+      warnings: primary.warnings || [],
       confidence: primary.confidence,
       candidates,
       activeIndex: 0,
@@ -3123,6 +3133,10 @@
     const cleanedText = cleanMultiline(text);
     const fields = parseReceiptOcrText(cleanedText);
     const missingFields = localOcrMissingFields(fields);
+    const warnings = localOcrWarnings(fields, cleanedText, {
+      candidateIndex: index,
+      fileName: meta.fileName || ""
+    });
     return {
       id: uid("ocr_candidate"),
       createdAt: new Date().toISOString(),
@@ -3132,7 +3146,8 @@
       text: cleanedText,
       fields,
       missingFields,
-      confidence: localOcrConfidence(fields, missingFields),
+      warnings,
+      confidence: localOcrConfidence(fields, missingFields, warnings),
       candidateLabel: label || `候補${index + 1}`,
       candidateIndex: index
     };
@@ -3161,6 +3176,7 @@
       text: cleanResults.map((result) => `--- ${result.fileName || "画像"} ---\n${result.text || ""}`).join("\n\n"),
       fields: primary ? primary.fields : {},
       missingFields: primary ? primary.missingFields : [],
+      warnings: primary ? primary.warnings || [] : [],
       confidence: primary ? primary.confidence : "低",
       candidates,
       activeIndex: 0,
@@ -3282,10 +3298,18 @@
     return result && Array.isArray(result.candidates) && result.candidates.length ? result.candidates.length : result ? 1 : 0;
   }
 
+  function localOcrWarningCount(result) {
+    if (!result) return 0;
+    const candidates = Array.isArray(result.candidates) && result.candidates.length ? result.candidates : [result];
+    return candidates.reduce((total, candidate) => total + ((candidate.warnings || []).length), 0);
+  }
+
   function localOcrDoneMessage(result) {
     const count = localOcrCandidateCount(result);
-    if (count > 1) return `読み取り結果を${count}件の候補に分けました。経費には自動登録せず、候補ごとに確認してからフォームへ反映してください。`;
-    if (result && result.missingFields && result.missingFields.length) return "読み取り結果を作成しました。未記入の項目を確認してからフォームへ反映してください。";
+    const warnings = localOcrWarningCount(result);
+    if (count > 1) return `読み取り結果を${count}件の候補に分けました。確認項目が${warnings}件あります。経費には自動登録せず、候補ごとに原本画像と照合してからフォームへ反映してください。`;
+    if (result && result.missingFields && result.missingFields.length) return `読み取り結果を作成しました。未記入と確認項目${warnings}件を確認してからフォームへ反映してください。`;
+    if (warnings) return `読み取り結果を作成しました。確認項目が${warnings}件あります。日付・金額・支払区分・T番号は原本で確認してください。`;
     return "読み取り結果を作成しました。フォームへ反映できます。";
   }
 
@@ -3376,6 +3400,8 @@
   }
 
   function extractOcrAmount(text) {
+    const bestCandidate = collectOcrMoneyCandidates(text)[0];
+    if (bestCandidate && bestCandidate.score >= 4) return bestCandidate.value;
     const lines = normalizeOcrText(text).split("\n").map((line) => line.trim()).filter(Boolean);
     const priority = lines.filter((line) => /合計|領収金額|請求金額|支払金額|ご請求|お買上|税込|領収額/.test(line));
     const prioritized = [...priority].reverse().map(extractLastYenNumber).find((value) => value > 0);
@@ -3474,9 +3500,128 @@
     return required.filter(([key]) => !hasDisplayValue(fields[key]) || fields[key] === "不明").map(([, label]) => label);
   }
 
-  function localOcrConfidence(fields, missingFields) {
+  function localOcrWarnings(fields, text, context = {}) {
+    const source = normalizeOcrText(text);
+    const warnings = [];
+    const moneyCandidates = collectOcrMoneyCandidates(source);
+    const paymentSignals = detectOcrPaymentSignals(source);
+    const amount = num(fields.amount);
+    if (hasMultipleReceiptSignals(source) || Number(context.candidateIndex) > 0) {
+      warnings.push("台紙分割候補です。元画像でこの候補が1枚のレシートか確認してください。");
+    }
+    if (!fields.date) {
+      warnings.push("日付が未記入です。2026を2076/2028などに誤読しやすいため原本確認が必要です。");
+    } else if (localOcrDateLooksSuspicious(fields.date, source)) {
+      warnings.push("日付が誤読されている可能性があります。原本の日付を確認してください。");
+    }
+    if (!amount) {
+      warnings.push("合計金額が未記入です。小計・税額・お釣り・電話番号を拾っていないか確認してください。");
+    } else if (ocrAmountLooksAmbiguous(source, amount, moneyCandidates)) {
+      warnings.push("金額候補が複数あります。登録金額が合計金額か確認してください。");
+    }
+    if (taxSplitNeedsReview(source, fields)) {
+      warnings.push("10%と8%が混在している可能性があります。税率別登録または金額分割を確認してください。");
+    }
+    if (amount >= 10000 && !isValidRegistration(fields.registrationNumber)) {
+      warnings.push("1万円以上でT番号が未確認です。適格請求書として扱う前にT番号を確認してください。");
+    } else if (fields.registrationNumber && !isValidRegistration(fields.registrationNumber)) {
+      warnings.push("T番号の形式が不正です。1桁違い・電話番号の誤読がないか確認してください。");
+    }
+    if (paymentSignals.length > 1) {
+      warnings.push("支払区分の候補が複数あります。カード・現金・電子マネー・振込のどれか確認してください。");
+    }
+    if (ocrVendorNeedsReview(fields.vendor)) {
+      warnings.push("取引先名が弱いです。ロゴ名・運営会社名・支店名の取り違えを確認してください。");
+    }
+    if (!fields.category || fields.category === "不明" || String(fields.category).includes("未")) {
+      warnings.push("経費科目は未確定です。税理士の分類に合わせて選び直してください。");
+    }
+    if (localOcrNeedsBusinessPurpose(fields, source)) {
+      warnings.push("飲食・衣類・物販系は業務用途、相手先、人数、目的をメモしてください。");
+    }
+    if (ocrImageQualityNeedsReview(source)) {
+      warnings.push("OCR文字量が少ない、または画像品質の影響を受けています。拡大して原本確認してください。");
+    }
+    warnings.push("税理士提出前に原本画像・金額・日付・支払区分を人が確認してください。");
+    return [...new Set(warnings)];
+  }
+
+  function collectOcrMoneyCandidates(text) {
+    return normalizeOcrText(text)
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .flatMap((line, index) => extractYenNumbers(line)
+        .filter((value) => value > 0 && value < 10000000)
+        .map((value) => ({ value, line, index, score: localOcrAmountLineScore(line, value) })))
+      .filter((candidate) => candidate.score > -4)
+      .sort((a, b) => (b.score - a.score) || (b.value - a.value) || (a.index - b.index));
+  }
+
+  function localOcrAmountLineScore(line, value) {
+    let score = 0;
+    if (/合計金額|合計|領収金額|領収額|請求金額|支払金額|カード計|クレジット計|現金計|お買上|お買い上げ|税込合計|売上合計/.test(line)) score += 5;
+    if (/クレジット|カード|現金|cash|visa|master|jcb|amex/i.test(line)) score += 2;
+    if (/小計|税抜|対象額/.test(line)) score -= 1;
+    if (/消費税|内税|外税|税額|お釣|おつり|釣銭|お預|預り|ポイント|割引|値引|クーポン|TEL|電話|登録番号|T\d{10,}|No\.?|伝票|時刻|時間|駐車時間|承認|会員|端末|バーコード|個|点|枚|L\/|km|リットル/i.test(line)) score -= 4;
+    if (value < 100) score -= 3;
+    return score;
+  }
+
+  function localOcrDateLooksSuspicious(dateValue, source) {
+    const year = Number(String(dateValue || "").slice(0, 4));
+    const currentYear = new Date().getFullYear();
+    if (!year || year < 2024 || year > currentYear + 1) return true;
+    return /(207\d|202[789])/.test(source);
+  }
+
+  function ocrAmountLooksAmbiguous(source, selectedAmount, moneyCandidates) {
+    const strongValues = [...new Set((moneyCandidates || [])
+      .filter((candidate) => candidate.score >= 4)
+      .map((candidate) => candidate.value))]
+      .filter((value) => value > 0);
+    if (strongValues.length >= 2 && !strongValues.includes(selectedAmount)) return true;
+    const visibleValues = [...new Set(extractYenNumbers(source).filter((value) => value > 0 && value < 10000000))];
+    return visibleValues.length >= 6 && strongValues.length !== 1;
+  }
+
+  function taxSplitNeedsReview(source, fields) {
+    const has10 = /10\s*%|10％/.test(source);
+    const has8 = /8\s*%|8％/.test(source);
+    if (has10 && has8 && (!fields.split10Amount || !fields.split8Amount)) return true;
+    return fields.taxRate === "混在" && (!fields.split10Amount || !fields.split8Amount);
+  }
+
+  function detectOcrPaymentSignals(text) {
+    const source = String(text || "").toLowerCase();
+    const signals = [];
+    if (/カード|card|visa|master|jcb|amex|クレジット/.test(source)) signals.push("card");
+    if (/現金|cash|お預|お釣|釣銭/.test(source)) signals.push("cash");
+    if (/振込|口座|銀行|道銀|bank/.test(source)) signals.push("bank");
+    if (/電子マネー|paypay|suica|pasmo|nanaco|waon|edy|\bid\b|quicpay/.test(source)) signals.push("electronic");
+    return [...new Set(signals)];
+  }
+
+  function ocrVendorNeedsReview(vendor) {
+    const value = clean(vendor);
+    if (!value || value.length < 2) return true;
+    return /領収|合計|カード|加盟店|売上票|納品書|請求|登録番号|TEL|電話|No\.?|様|JCB|VISA|Master|AMEX/i.test(value);
+  }
+
+  function localOcrNeedsBusinessPurpose(fields, source) {
+    const haystack = `${fields.vendor || ""} ${fields.category || ""} ${fields.itemName || ""} ${source}`;
+    return /飲食|食事|弁当|焼肉|珈琲|コーヒー|カフェ|レストラン|マクドナルド|ラーメン|居酒屋|衣類|服|LACOSTE|POLO|FIGHTERS|ES CON|ギフト|土産|食べ放題/i.test(haystack);
+  }
+
+  function ocrImageQualityNeedsReview(source) {
+    const lines = normalizeOcrText(source).split("\n").map((line) => line.trim()).filter(Boolean);
+    return lines.length < 5 || normalizeOcrText(source).replace(/\s/g, "").length < 60;
+  }
+
+  function localOcrConfidence(fields, missingFields, warnings = []) {
     const filled = ["date", "vendor", "amount", "paymentMethod", "taxRate", "registrationNumber"].filter((key) => hasDisplayValue(fields[key]) && fields[key] !== "不明").length;
-    if (!missingFields.length && filled >= 5) return "高";
+    if ((warnings || []).length >= 5 || missingFields.length >= 2) return "低";
+    if (!missingFields.length && filled >= 5 && !(warnings || []).length) return "高";
     if (filled >= 3) return "中";
     return "低";
   }
@@ -3489,6 +3634,7 @@
     candidates.forEach((candidate, index) => {
       const fields = candidate.fields || {};
       const missingFields = candidate.missingFields || [];
+      const warnings = candidate.warnings || [];
       state.documentExtracts.push({
         id: uid("extract"),
         documentDate: fields.date || TODAY,
@@ -3503,7 +3649,7 @@
         rowCount: candidate.text ? candidate.text.split("\n").length : 0,
         targetLedger: "経費",
         linkedRecordId: "",
-        status: missingFields.length ? "要確認" : "読取済",
+        status: missingFields.length || warnings.length ? "要確認" : "読取済",
         confidence: candidate.confidence || result.confidence,
         extractedText: candidate.text || "",
         numericMemo: [
@@ -3513,14 +3659,20 @@
         ].filter(Boolean).join(" / "),
         issueMemo: [
           candidates.length > 1 ? "台紙写真から分割した候補。登録前に原本画像と照合してください。" : "",
-          missingFields.length ? `未記入: ${missingFields.join("、")}` : ""
+          missingFields.length ? `未記入: ${missingFields.join("、")}` : "",
+          warnings.length ? `確認: ${warnings.join(" / ")}` : ""
         ].filter(Boolean).join(" "),
         createdAt,
         updatedAt: createdAt
       });
     });
     if (state.documentExtracts.length > 600) state.documentExtracts = state.documentExtracts.slice(-600);
-    addAudit("ローカルOCR読取", { file: result.fileName, candidates: candidates.length, missing: candidates.flatMap((candidate) => candidate.missingFields || []).join("、") });
+    addAudit("ローカルOCR読取", {
+      file: result.fileName,
+      candidates: candidates.length,
+      missing: candidates.flatMap((candidate) => candidate.missingFields || []).join("、"),
+      warnings: candidates.flatMap((candidate) => candidate.warnings || []).length
+    });
     persist("ローカルOCR保存");
   }
 
@@ -3547,11 +3699,16 @@
     if (form.elements.invoiceEligible) form.elements.invoiceEligible.checked = Boolean(fields.registrationNumber);
     if (form.elements.expenseEligibility) form.elements.expenseEligibility.value = "auto";
     if (form.elements.note) {
-      form.elements.note.value = [fields.note, activeResult.text ? `読み取り文字:\n${activeResult.text}` : ""].filter(Boolean).join("\n\n");
+      const warnings = activeResult.warnings || [];
+      const warningNote = warnings.length ? `OCR確認項目:\n- ${warnings.join("\n- ")}` : "";
+      form.elements.note.value = [fields.note, warningNote, activeResult.text ? `読み取り文字:\n${activeResult.text}` : ""].filter(Boolean).join("\n\n");
     }
     const proof = activeResult.proof || lastLocalOcrResult.proof;
     if (proof) form.dataset.ocrProofId = activeResult.id || lastLocalOcrResult.id;
-    setLocalOcrMessage("選択した候補をフォームへ反映しました。未記入がある場合は赤表示の項目を手入力してください。", (activeResult.missingFields || []).length ? "warn" : "good");
+    setLocalOcrMessage(
+      "選択した候補をフォームへ反映しました。未記入や確認項目がある場合は、登録前に原本画像で確認してください。",
+      (activeResult.missingFields || []).length || (activeResult.warnings || []).length ? "warn" : "good"
+    );
   }
 
   function setFormValue(form, name, value) {
