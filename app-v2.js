@@ -3152,8 +3152,12 @@
 
   function createLocalOcrTiles(canvas, fileName) {
     if (!canvas || canvas.tagName !== "CANVAS") return [];
+    const longest = Math.max(canvas.width || 0, canvas.height || 0);
     const layouts = [[3, 2], [2, 3]];
-    if (Math.max(canvas.width || 0, canvas.height || 0) >= 2400) layouts.push([3, 3]);
+    if (longest >= 2400) layouts.push([3, 3]);
+    if (longest >= 2800) {
+      layouts.push((canvas.width || 0) >= (canvas.height || 0) ? [4, 3] : [3, 4]);
+    }
     const overlapRatio = 0.08;
     const tiles = [];
     layouts.forEach(([columns, rows]) => {
@@ -3350,12 +3354,12 @@
     const ocrPayload = typeof payload === "string" ? { text: payload } : payload || {};
     const text = cleanMultiline(ocrPayload.text || "");
     const candidateTexts = splitLocalOcrCandidateTexts(text, ocrPayload);
-    const candidates = candidateTexts.map((candidate, index) => buildLocalOcrCandidate(
+    const candidates = sortLocalOcrCandidatesByQuality(candidateTexts.map((candidate, index) => buildLocalOcrCandidate(
       candidate.text || candidate,
       localOcrCandidateMeta(candidate, meta),
       index,
       candidate.label
-    ));
+    )));
     const primary = candidates[0] || buildLocalOcrCandidate(text, meta, 0, "");
     const missingFields = primary.missingFields || [];
     return {
@@ -3419,11 +3423,48 @@
     };
   }
 
+  function sortLocalOcrCandidatesByQuality(candidates) {
+    return (candidates || [])
+      .filter(Boolean)
+      .map((candidate, originalIndex) => ({
+        candidate,
+        originalIndex,
+        score: localOcrCandidateQualityScore(candidate)
+      }))
+      .sort((a, b) => (b.score - a.score) || (a.originalIndex - b.originalIndex))
+      .map(({ candidate }, index) => ({
+        ...candidate,
+        candidateIndex: index
+      }));
+  }
+
+  function localOcrCandidateQualityScore(candidate) {
+    if (!candidate) return -999;
+    const fields = candidate.fields || {};
+    const text = candidate.text || "";
+    let score = localOcrReceiptEvidenceScore(text) * 3;
+    if (hasDisplayValue(fields.date)) score += localOcrDateLooksSuspicious(fields.date, text) ? -5 : 5;
+    if (hasDisplayValue(fields.vendor)) score += 4;
+    if (num(fields.amount)) {
+      score += 6;
+      if (ocrAmountLooksAmbiguous(text, num(fields.amount))) score -= 6;
+    }
+    if (hasDisplayValue(fields.paymentMethod)) score += 3;
+    if (hasDisplayValue(fields.taxRate)) score += 2;
+    if (isValidRegistration(fields.registrationNumber)) score += 2;
+    if (num(fields.split10Amount) || num(fields.split8Amount)) score += 2;
+    score -= (candidate.missingFields || []).length * 5;
+    score -= Math.min((candidate.warnings || []).length, 4);
+    if (localOcrCandidateLooksMerged(text)) score -= 20;
+    if (ocrImageQualityNeedsReview(text)) score -= 2;
+    return score;
+  }
+
   function mergeLocalOcrResults(results) {
     const cleanResults = (results || []).filter(Boolean);
     if (!cleanResults.length) return null;
     if (cleanResults.length === 1) return cleanResults[0];
-    const candidates = cleanResults.flatMap((result) => {
+    const candidates = sortLocalOcrCandidatesByQuality(cleanResults.flatMap((result) => {
       const resultCandidates = Array.isArray(result.candidates) && result.candidates.length ? result.candidates : [result];
       return resultCandidates.map((candidate, index) => ({
         ...candidate,
@@ -3431,7 +3472,7 @@
         proof: candidate.proof || result.proof || null,
         fileName: candidate.fileName || result.fileName || ""
       }));
-    });
+    }));
     const primary = candidates[0];
     return {
       id: uid("ocr_batch"),
