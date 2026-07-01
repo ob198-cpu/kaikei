@@ -122,6 +122,8 @@
     invoices: { query: "", status: "all", due: "all" }
   };
 
+  pageMeta.taxAccountant = ["税理士連携", "通帳・カード明細・請求書・賃金台帳を提出資料としてまとめて照合"];
+
   document.addEventListener("DOMContentLoaded", init);
 
   function init() {
@@ -136,13 +138,19 @@
 
   function ensureHistoryNav() {
     const nav = document.querySelector(".nav");
-    if (!nav || nav.querySelector('[data-view="history"]')) return;
+    if (!nav) return;
+    ensureNavItem(nav, "taxAccountant", "税理士連携", "closing");
+    ensureNavItem(nav, "history", "履歴", "settings");
+  }
+
+  function ensureNavItem(nav, view, label, beforeView) {
+    if (nav.querySelector(`[data-view="${view}"]`)) return;
     const button = document.createElement("button");
     button.className = "nav-item";
-    button.dataset.view = "history";
+    button.dataset.view = view;
     button.type = "button";
-    button.textContent = "履歴";
-    nav.insertBefore(button, nav.querySelector('[data-view="settings"]'));
+    button.textContent = label;
+    nav.insertBefore(button, nav.querySelector(`[data-view="${beforeView}"]`) || null);
   }
 
   function defaultState() {
@@ -183,6 +191,7 @@
       journals: [],
       trash: [],
       handoffs: [],
+      taxAccountantPacks: [],
       audit: []
     };
   }
@@ -232,6 +241,7 @@
       "journals",
       "trash",
       "handoffs",
+      "taxAccountantPacks",
       "audit"
     ].forEach((key) => {
       normalized[key] = Array.isArray(input && input[key]) ? input[key] : [];
@@ -1931,6 +1941,7 @@
       expenses: renderExpenses,
       approvals: renderApprovals,
       dataLink: renderDataLink,
+      taxAccountant: renderTaxAccountant,
       sales: renderSales,
       invoices: renderInvoices,
       estimates: renderEstimates,
@@ -3800,6 +3811,347 @@
       button.addEventListener("click", () => switchView(button.dataset.viewJump));
     });
     bindTableActions();
+  }
+
+  function taxSubmissionStatuses() {
+    return ["詳細待ち", "照合中", "不足あり", "提出準備OK", "提出済"];
+  }
+
+  function defaultTaxSubmissionItems() {
+    return [
+      {
+        id: "bank",
+        no: "①",
+        title: "通帳",
+        driveUrl: "https://drive.google.com/open?id=13tqcdPCDGaAllAduae-QpAVG_SSHPIgz&usp=drive_copy",
+        description: "通帳PDF、ハイテク明細、WEB振込を売上・入金・ハイテク台帳と照合します。",
+        files: ["2026-6-25_(2).pdf", "ハイテク明細　2025.6～.zip", "WEB振込2025.6～ (5).zip", "nmr20260701073104"],
+        linkedViews: [
+          { view: "sales", label: "売上" },
+          { view: "dataLink", label: "データ連携" },
+          { view: "hitech", label: "ハイテク台帳" }
+        ],
+        checks: [
+          { id: "bank-imported", label: "通帳・WEB振込の入金を売上一覧へ反映済み" },
+          { id: "bank-invoice", label: "請求書番号と入金を紐づけ済み" },
+          { id: "bank-hitech", label: "ハイテク明細をハイテク台帳と照合済み" }
+        ]
+      },
+      {
+        id: "jcb",
+        no: "②",
+        title: "クレジットカード明細（JCB）",
+        driveUrl: "https://drive.google.com/open?id=1TWu5YWSoNMbr_US8TCIrWQmtXVS4U2n0&usp=drive_copy",
+        description: "カード明細とAmazon等の適格請求書をカード台帳・レシート画像と照合します。",
+        files: ["カード明細", "202606meisai.pdf", "202607meisai.pdf", "カードインボイス2025.6～.zip　→Amazonの適格請求書"],
+        linkedViews: [
+          { view: "cards", label: "カード台帳" },
+          { view: "receipts", label: "レシート管理" },
+          { view: "expenses", label: "経費表" }
+        ],
+        checks: [
+          { id: "jcb-statement", label: "カード明細をカード台帳へ反映済み" },
+          { id: "jcb-invoice", label: "Amazon等の適格請求書を証憑として確認済み" },
+          { id: "jcb-duplicate", label: "現金・通帳取込との二重登録がないことを確認済み" }
+        ]
+      },
+      {
+        id: "sales",
+        no: "③",
+        title: "売上請求書 / カード支払記録簿",
+        driveUrl: "https://drive.google.com/open?id=1LFYUd0jadsYlTDBrgsfJ7lpcdaPp1XzQ&usp=drive_copy",
+        description: "売上請求書とカード支払記録簿を売上・請求書番号・入金とつなげます。",
+        files: ["売り上げ2025506～.zip", "カード支払い記録簿2025年度.xlsx"],
+        linkedViews: [
+          { view: "invoices", label: "請求書" },
+          { view: "sales", label: "売上" },
+          { view: "salesFlow", label: "販売管理" }
+        ],
+        checks: [
+          { id: "sales-invoices", label: "請求書番号・請求日・支払期限を確認済み" },
+          { id: "sales-payment", label: "入金日と売上計上の確認メモを残した" },
+          { id: "sales-card-record", label: "カード支払記録簿と請求書・領収書の関係を確認済み" }
+        ]
+      },
+      {
+        id: "payables",
+        no: "④",
+        title: "支払請求書",
+        driveUrl: "https://drive.google.com/open?id=1KJ1h5vJBJ_7HxT7lfdUFk03wZfj2NZ5M&usp=drive_copy",
+        description: "お客様月別請求書とCDP宛請求書を、支払依頼・受領書類・経費に紐づけます。",
+        files: ["お客様月別請求書CDP2025.6～.zip", "CDP宛請求書2025.6～.zip"],
+        linkedViews: [
+          { view: "paymentRequests", label: "支払依頼" },
+          { view: "receivedDocs", label: "受領書類" },
+          { view: "expenses", label: "経費表" }
+        ],
+        checks: [
+          { id: "payables-vendor", label: "CDP宛請求書を支払依頼・経費へ反映済み" },
+          { id: "payables-customer", label: "お客様月別請求書を案件・売上側と照合済み" },
+          { id: "payables-proof", label: "未払い・二重支払・証憑不足がないか確認済み" }
+        ]
+      },
+      {
+        id: "payroll",
+        no: "⑤",
+        title: "賃金",
+        driveUrl: "",
+        description: "賃金台帳を給与台帳と照合し、提出用に不足がないか確認します。",
+        files: ["賃金台帳2026.zip"],
+        linkedViews: [
+          { view: "payroll", label: "給与台帳" },
+          { view: "closing", label: "締め登録" }
+        ],
+        checks: [
+          { id: "payroll-ledger", label: "賃金台帳を給与台帳へ反映済み" },
+          { id: "payroll-period", label: "対象期間・支払日・金額を確認済み" },
+          { id: "payroll-submit", label: "税理士へ渡すZIP名と中身を確認済み" }
+        ]
+      }
+    ];
+  }
+
+  function getTaxAccountantPack() {
+    if (!Array.isArray(state.taxAccountantPacks)) state.taxAccountantPacks = [];
+    const packId = `tax-accountant-${selectedFiscalYear}`;
+    let pack = state.taxAccountantPacks.find((item) => item.fiscalYear === selectedFiscalYear || item.id === packId);
+    if (!pack) {
+      pack = {
+        id: packId,
+        fiscalYear: selectedFiscalYear,
+        createdAt: new Date().toISOString(),
+        updatedAt: "",
+        items: []
+      };
+      state.taxAccountantPacks.push(pack);
+    }
+
+    const previousItems = Array.isArray(pack.items) ? pack.items : [];
+    pack.items = defaultTaxSubmissionItems().map((base) => {
+      const existing = previousItems.find((item) => item.id === base.id) || {};
+      const previousChecks = Array.isArray(existing.checks) ? existing.checks : [];
+      return {
+        ...base,
+        status: existing.status || "詳細待ち",
+        note: existing.note || "",
+        driveUrl: existing.driveUrl !== undefined ? existing.driveUrl : base.driveUrl,
+        files: Array.isArray(existing.files) && existing.files.length ? existing.files : base.files,
+        checks: base.checks.map((check) => {
+          const old = previousChecks.find((item) => item.id === check.id) || {};
+          return { ...check, done: Boolean(old.done) };
+        })
+      };
+    });
+    return pack;
+  }
+
+  function taxSubmissionCheckCount(items) {
+    const checks = items.flatMap((item) => item.checks || []);
+    return {
+      total: checks.length,
+      done: checks.filter((check) => check.done).length
+    };
+  }
+
+  function taxSubmissionStatusBadge(status) {
+    const classes = {
+      "提出済": "good",
+      "提出準備OK": "good",
+      "不足あり": "bad",
+      "照合中": "warn",
+      "詳細待ち": "warn"
+    };
+    return `<span class="badge ${classes[status] || "warn"}">${esc(status || "詳細待ち")}</span>`;
+  }
+
+  function renderTaxAccountant() {
+    const pack = getTaxAccountantPack();
+    const items = pack.items || [];
+    const checks = taxSubmissionCheckCount(items);
+    const readyCount = items.filter((item) => ["提出準備OK", "提出済"].includes(item.status)).length;
+    const missingCount = items.filter((item) => !item.driveUrl || !(item.note || "").trim()).length;
+
+    app.innerHTML = `
+      <div class="grid cols-4">
+        ${summaryCard("提出カテゴリ", `${items.length}件`, "通帳・カード・売上・支払・賃金")}
+        ${summaryCard("照合チェック", `${checks.done}/${checks.total}`, "台帳や請求書との紐づけ")}
+        ${summaryCard("提出準備", `${readyCount}件`, "提出準備OKまたは提出済")}
+        ${summaryCard("未記入注意", `${missingCount}件`, "リンクまたはメモの不足")}
+      </div>
+
+      <section class="panel" style="margin-top:14px;">
+        <div class="panel-head">
+          <h2>税理士提出資料の連携</h2>
+          <div class="actions">
+            <button class="button secondary small" id="exportTaxSubmissionHtml" type="button">提出一覧HTML</button>
+            <button class="button secondary small" data-view-jump="closing" type="button">締め登録へ</button>
+          </div>
+        </div>
+        <div class="panel-body">
+          <div class="notice info">
+            ここでは提出予定の資料を「どの台帳・売上・支払と照合するか」まで管理します。各資料の詳細を後から貼り付ける場合は、該当カードの詳細メモに追記してください。
+          </div>
+          <div class="tax-pack-layout">
+            ${items.map(renderTaxSubmissionCard).join("")}
+          </div>
+        </div>
+      </section>
+    `;
+
+    bindTaxAccountantActions();
+  }
+
+  function renderTaxSubmissionCard(item) {
+    const statusOptions = taxSubmissionStatuses()
+      .map((status) => `<option value="${esc(status)}" ${item.status === status ? "selected" : ""}>${esc(status)}</option>`)
+      .join("");
+    const noteState = (item.note || "").trim() ? "記入済み" : `<strong class="red-note">未記入</strong>`;
+    const driveState = item.driveUrl
+      ? `<a class="tax-link" href="${esc(item.driveUrl)}" target="_blank" rel="noopener">Google Driveを開く</a>`
+      : `<strong class="red-note">未記入</strong>`;
+
+    return `
+      <article class="tax-pack-card">
+        <div class="tax-pack-card-head">
+          <div>
+            <div class="tax-pack-title-line"><span class="badge">${esc(item.no)}</span><h3>${esc(item.title)}</h3></div>
+            <p>${esc(item.description)}</p>
+          </div>
+          ${taxSubmissionStatusBadge(item.status)}
+        </div>
+
+        <div class="tax-pack-meta">
+          <span>Drive: ${driveState}</span>
+          <span>詳細メモ: ${noteState}</span>
+        </div>
+
+        <div class="tax-pack-file-list">
+          <strong>提出予定ファイル</strong>
+          <ul>${(item.files || []).map((file) => `<li>${esc(file)}</li>`).join("")}</ul>
+        </div>
+
+        <div class="tax-pack-links">
+          <strong>照合する画面</strong>
+          <div class="actions">
+            ${(item.linkedViews || []).map((link) => `<button class="button secondary small" data-view-jump="${esc(link.view)}" type="button">${esc(link.label)}</button>`).join("")}
+          </div>
+        </div>
+
+        <div class="form-grid tax-pack-form">
+          <label class="field">
+            <span>状態</span>
+            <select data-tax-status="${esc(item.id)}">${statusOptions}</select>
+          </label>
+          <label class="field">
+            <span>Driveリンク</span>
+            <input data-tax-drive="${esc(item.id)}" type="url" value="${esc(item.driveUrl || "")}" placeholder="Google DriveのURL">
+          </label>
+          <label class="field" style="grid-column:1 / -1;">
+            <span>詳細メモ</span>
+            <textarea data-tax-note="${esc(item.id)}" placeholder="資料の中身、照合結果、不足、税理士への確認事項を記入">${esc(item.note || "")}</textarea>
+          </label>
+        </div>
+
+        <div class="tax-pack-check-list">
+          ${(item.checks || []).map((check) => `
+            <label class="check-field">
+              <input type="checkbox" data-tax-check="${esc(item.id)}" data-check-id="${esc(check.id)}" ${check.done ? "checked" : ""}>
+              <span>${esc(check.label)}</span>
+            </label>
+          `).join("")}
+        </div>
+      </article>
+    `;
+  }
+
+  function bindTaxAccountantActions() {
+    const exportButton = document.getElementById("exportTaxSubmissionHtml");
+    if (exportButton) exportButton.addEventListener("click", exportTaxAccountantSubmissionHtml);
+    app.querySelectorAll("[data-view-jump]").forEach((button) => {
+      button.addEventListener("click", () => switchView(button.dataset.viewJump));
+    });
+    app.querySelectorAll("[data-tax-status]").forEach((select) => {
+      select.addEventListener("change", () => {
+        updateTaxSubmissionItem(select.dataset.taxStatus, (item) => {
+          item.status = select.value;
+        }, "税理士提出資料の状態更新");
+      });
+    });
+    app.querySelectorAll("[data-tax-drive]").forEach((input) => {
+      input.addEventListener("change", () => {
+        updateTaxSubmissionItem(input.dataset.taxDrive, (item) => {
+          item.driveUrl = input.value.trim();
+        }, "税理士提出資料のDriveリンク更新");
+      });
+    });
+    app.querySelectorAll("[data-tax-note]").forEach((textarea) => {
+      textarea.addEventListener("change", () => {
+        updateTaxSubmissionItem(textarea.dataset.taxNote, (item) => {
+          item.note = textarea.value.trim();
+        }, "税理士提出資料のメモ更新");
+      });
+    });
+    app.querySelectorAll("[data-tax-check]").forEach((checkbox) => {
+      checkbox.addEventListener("change", () => {
+        updateTaxSubmissionItem(checkbox.dataset.taxCheck, (item) => {
+          const check = (item.checks || []).find((entry) => entry.id === checkbox.dataset.checkId);
+          if (check) check.done = checkbox.checked;
+        }, "税理士提出資料の照合チェック更新");
+      });
+    });
+  }
+
+  function updateTaxSubmissionItem(itemId, updater, action) {
+    const pack = getTaxAccountantPack();
+    const item = (pack.items || []).find((entry) => entry.id === itemId);
+    if (!item) return;
+    updater(item);
+    pack.updatedAt = new Date().toISOString();
+    addAudit(action, { fiscalYear: selectedFiscalYear, item: item.title });
+    persist(action);
+    renderTaxAccountant();
+  }
+
+  function exportTaxAccountantSubmissionHtml() {
+    const pack = getTaxAccountantPack();
+    const rows = (pack.items || []).map((item) => {
+      const checkText = (item.checks || []).map((check) => `${check.done ? "済" : "未確認"}：${esc(check.label)}`).join("<br>");
+      const fileText = (item.files || []).map((file) => esc(file)).join("<br>");
+      const driveText = item.driveUrl ? `<a href="${esc(item.driveUrl)}">${esc(item.driveUrl)}</a>` : `<strong class="bad">未記入</strong>`;
+      const noteText = (item.note || "").trim() ? esc(item.note) : `<strong class="bad">未記入</strong>`;
+      return `<tr>
+        <td>${esc(item.no)} ${esc(item.title)}</td>
+        <td>${esc(item.status || "詳細待ち")}</td>
+        <td>${driveText}</td>
+        <td>${fileText}</td>
+        <td>${checkText}</td>
+        <td>${noteText}</td>
+      </tr>`;
+    }).join("");
+    const html = `<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <title>税理士提出資料一覧 ${selectedFiscalYear}年度</title>
+  <style>
+    body{font-family:"Yu Gothic",Meiryo,sans-serif;color:#172033;margin:28px;line-height:1.55}
+    h1{font-size:24px;margin-bottom:4px}.muted{color:#637087}
+    table{width:100%;border-collapse:collapse;margin-top:16px}th,td{border:1px solid #d8dee8;padding:8px;vertical-align:top;text-align:left}th{background:#e7f0fb}
+    .bad{color:#b73838;font-weight:800}
+  </style>
+</head>
+<body>
+  <h1>${esc(state.settings.companyName)} 税理士提出資料一覧</h1>
+  <p class="muted">${selectedFiscalYear}年度 / ${formatDate(getFiscalRange(selectedFiscalYear).start)} - ${formatDate(getFiscalRange(selectedFiscalYear).end)} / 出力日 ${formatDate(TODAY)}</p>
+  <table>
+    <thead><tr><th>資料</th><th>状態</th><th>Drive</th><th>予定ファイル</th><th>照合チェック</th><th>詳細メモ</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table>
+</body>
+</html>`;
+    addAudit("税理士提出資料一覧HTML出力", { fiscalYear: selectedFiscalYear });
+    persist("税理士提出資料一覧HTML出力");
+    downloadBlob(`税理士提出資料一覧-${selectedFiscalYear}年度-${TODAY}.html`, new Blob([html], { type: "text/html;charset=utf-8" }));
   }
 
   function renderClosing() {
@@ -5858,6 +6210,7 @@
   }
 
   function exportAccountantPackage() {
+    const taxAccountantPack = getTaxAccountantPack();
     const payload = {
       exportedAt: new Date().toISOString(),
       type: "accountant-package",
@@ -5886,6 +6239,7 @@
       bookEntries: fiscalBookEntries(),
       trash: state.trash || [],
       handoffs: fiscalHandoffs(),
+      taxAccountantPacks: [taxAccountantPack],
       sendLogs: fiscalSendLogs(),
       audit: state.audit
     };

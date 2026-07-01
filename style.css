@@ -1237,6 +1237,96 @@ dialog::backdrop {
   font-weight: 800;
 }
 
+.tax-pack-layout {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.tax-pack-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  padding: 14px;
+  box-shadow: var(--shadow);
+}
+
+.tax-pack-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 12px;
+}
+
+.tax-pack-title-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.tax-pack-title-line h3 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.tax-pack-card p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.tax-pack-meta,
+.tax-pack-links {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.tax-link {
+  color: var(--nav-dark);
+  font-weight: 800;
+}
+
+.tax-pack-file-list {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid #dbe7f6;
+  border-radius: 8px;
+  background: #f7faff;
+}
+
+.tax-pack-file-list strong,
+.tax-pack-links strong {
+  display: block;
+  margin-bottom: 8px;
+}
+
+.tax-pack-file-list ul {
+  margin: 0;
+  padding-left: 20px;
+  color: var(--text);
+}
+
+.tax-pack-form {
+  margin-top: 12px;
+}
+
+.tax-pack-check-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
 .book-filter,
 .report-toolbar {
   display: flex;
@@ -1292,6 +1382,10 @@ dialog::backdrop {
 
   .health-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .tax-pack-layout {
+    grid-template-columns: 1fr;
   }
 
   .filter-bar {
