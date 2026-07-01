@@ -3716,6 +3716,11 @@
     if (y >= 2070 && y <= 2079) y = 2020 + (y % 10);
     if (y > currentYear + 2 || y < 2000) return "";
     if (!y || !m || !d || m > 12 || d > 31) return "";
+    const parsed = new Date(y, m - 1, d);
+    if (parsed.getFullYear() !== y || parsed.getMonth() !== m - 1 || parsed.getDate() !== d) return "";
+    const today = new Date();
+    const futureLimit = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 7);
+    if (parsed > futureLimit) return "";
     return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
   }
 
@@ -3857,7 +3862,12 @@
       return next;
     }
     if (next.date && localOcrDateNeedsManualEntry(next.date, source)) next.date = "";
+    if (next.date && localOcrDateHasConflictingCandidates(next.date, source)) next.date = "";
     if (next.amount && !localOcrAmountIsReliable(source, next.amount, moneyCandidates)) {
+      next.amount = "";
+      next.unitPrice = "";
+    }
+    if (next.amount && ocrAmountLooksAmbiguous(source, num(next.amount), moneyCandidates)) {
       next.amount = "";
       next.unitPrice = "";
     }
@@ -3878,6 +3888,14 @@
     if (/(207[0-9]|202[89])/.test(source) && !localOcrSourceClearlySupportsDate(dateValue, source)) return true;
     const dateCandidates = collectOcrDateCandidates(source).filter((candidate) => candidate.value === dateValue);
     return !dateCandidates.some((candidate) => candidate.score >= 3);
+  }
+
+  function localOcrDateHasConflictingCandidates(dateValue, source) {
+    const values = [...new Set(collectOcrDateCandidates(source)
+      .filter((candidate) => candidate.score >= 3)
+      .map((candidate) => candidate.value)
+      .filter(Boolean))];
+    return values.length >= 2 && values.some((value) => value !== dateValue);
   }
 
   function localOcrSourceClearlySupportsDate(dateValue, source) {
@@ -3942,6 +3960,11 @@
     }
     if (!fields.date) {
       warnings.push("日付が未記入です。2026を2076/2028などに誤読しやすいため原本確認が必要です。");
+      if (localOcrDateHasConflictingCandidates("", source)) {
+        warnings.push("日付候補が複数あります。台紙内の別レシートの日付を拾っていないか確認してください。");
+      }
+    } else if (localOcrDateHasConflictingCandidates(fields.date, source)) {
+      warnings.push("日付候補が複数あります。台紙内の別レシートの日付を拾っていないか確認してください。");
     } else if (localOcrDateLooksSuspicious(fields.date, source)) {
       warnings.push("日付が誤読されている可能性があります。原本の日付を確認してください。");
     }
@@ -3991,10 +4014,14 @@
 
   function localOcrAmountLineScore(line, value) {
     let score = 0;
-    if (/合計金額|合計|領収金額|領収額|請求金額|支払金額|カード計|クレジット計|現金計|お買上|お買い上げ|税込合計|売上合計|支払額|金額/.test(line)) score += 5;
-    if (/クレジット|カード|現金|cash|visa|master|jcb|amex/i.test(line)) score += 2;
-    if (/小計|税抜|対象額/.test(line)) score -= 1;
-    if (/消費税|内税|外税|税額|お釣|おつり|釣銭|お預|預り|ポイント|割引|値引|クーポン|TEL|電話|登録番号|T\d{10,}|No\.?|伝票|時刻|時間|駐車時間|承認|会員|端末|バーコード|個|点|枚|L\/|km|リットル/i.test(line)) score -= 4;
+    const source = String(line || "");
+    const strongTotal = /合計金額|領収金額|領収額|請求金額|支払金額|税込合計|売上合計|ご請求金額|お会計|合計\s*[:：]?\s*(¥|[0-9])/.test(source);
+    if (strongTotal) score += 7;
+    else if (/合計|カード計|クレジット計|現金計|お買上|お買い上げ|支払額|金額/.test(source)) score += 4;
+    if (/クレジット|カード|現金|cash|visa|master|jcb|amex/i.test(source)) score += 1;
+    if (/小計|税抜|対象額|税率別|内訳/.test(source)) score -= 2;
+    if (/消費税|内税|外税|税額|お釣|おつり|釣銭|お預|預り|ポイント|割引|値引|クーポン|TEL|電話|登録番号|T\d{10,}|No\.?|伝票|時刻|時間|駐車時間|承認|会員|端末|バーコード|個|点|枚|L\/|km|リットル/i.test(source)) score -= strongTotal ? 2 : 5;
+    if (/お釣|おつり|釣銭|お預|預り|ポイント|承認|会員|端末/.test(source) && !strongTotal) score -= 3;
     if (value < 100) score -= 3;
     return score;
   }
