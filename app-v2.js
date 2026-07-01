@@ -44,6 +44,10 @@
   const paymentRequestStatuses = ["下書き", "申請中", "差し戻し", "承認済", "支払済"];
   const receivedDocTypes = ["請求書", "領収書", "納品書", "見積書", "契約書", "振込実行結果", "その他"];
   const receivedDocStatuses = ["未確認", "保管", "支払依頼待ち", "申請中", "承認済", "支払済"];
+  const documentSourceCategories = ["通帳", "クレジットカード", "売上請求書", "支払請求書", "賃金", "ハイテク", "WEB振込", "受領書類", "その他"];
+  const documentSourceFormats = ["PDF", "Excel", "CSV", "ZIP", "画像", "テキスト", "その他"];
+  const documentExtractStatuses = ["未読取", "読取済", "照合中", "要確認", "反映済", "対象外"];
+  const documentConfidenceOptions = ["高", "中", "低"];
   const ledgerStatuses = ["未処理", "確認中", "完了", "保留"];
   const paymentMethods = [
     ["card", "カード"],
@@ -60,6 +64,7 @@
     expenses: ["経費表", "税理士の分類に合わせて品名、個数、単価、経費を管理"],
     approvals: ["申請・承認", "支払依頼、事前申請、承認、差し戻し、支払済みを管理"],
     dataLink: ["データ連携", "通帳CSV、カード明細CSVの取込履歴と処理状況を管理"],
+    documentExtracts: ["資料読取", "PDF・Excel・画像から吸い上げたテキストと数字を台帳化"],
     sales: ["売上", "振込入金を売上として通帳別に管理"],
     invoices: ["請求書", "請求番号、実施日、支払予定日、入金日のずれを管理"],
     estimates: ["見積", "見積番号、金額、請求書化状況を記録"],
@@ -135,6 +140,7 @@
     applyBundledBankbookNmrMigrations();
     applyBundledHitechMigrations();
     applyBundledWebTransferMigrations();
+    applyBundledDocumentExtractMigrations();
     applyExpenseEligibilityDefaults();
     persist("自動保存");
     render();
@@ -143,6 +149,7 @@
   function ensureHistoryNav() {
     const nav = document.querySelector(".nav");
     if (!nav) return;
+    ensureNavItem(nav, "documentExtracts", "資料読取", "dataLink");
     ensureNavItem(nav, "taxAccountant", "税理士連携", "closing");
     ensureNavItem(nav, "history", "履歴", "settings");
   }
@@ -180,6 +187,7 @@
       paymentRequests: [],
       importBatches: [],
       bankbookEntries: [],
+      documentExtracts: [],
       sales: [],
       invoices: [],
       estimates: [],
@@ -231,6 +239,7 @@
       "paymentRequests",
       "importBatches",
       "bankbookEntries",
+      "documentExtracts",
       "sales",
       "invoices",
       "estimates",
@@ -477,6 +486,122 @@
       receivedDocs: existingDoc ? "更新" : "追加",
       importBatches: existingBatch ? "更新" : "追加",
       receiptNo: "0625003"
+    });
+  }
+
+  function applyBundledDocumentExtractMigrations() {
+    const migrationId = "document-extracts-visible-tax-files-v1";
+    state.settings.appliedMigrations = Array.isArray(state.settings.appliedMigrations) ? state.settings.appliedMigrations : [];
+    if (state.settings.appliedMigrations.includes(migrationId)) return;
+
+    state.documentExtracts = Array.isArray(state.documentExtracts) ? state.documentExtracts : [];
+    const records = [
+      {
+        id: "extract-bankbook-20260625-pdf-visible",
+        documentDate: "2026-06-25",
+        sourceCategory: "通帳",
+        sourceFormat: "PDF",
+        sourceFile: "2026-6-25_(2).pdf",
+        documentTitle: "通帳明細 2026年4月末ページ",
+        counterparty: "道銀 / ソヨ支店(166)",
+        primaryAmount: 1577019,
+        taxAmount: "",
+        grossAmount: 1577019,
+        rowCount: 7,
+        targetLedger: "通帳明細",
+        linkedRecordId: "bankbookEntries:7件",
+        status: "照合中",
+        confidence: "中",
+        extractedText: "貼付画像で読める範囲: AIGソンポ18,370円、オガサキサトシ455,818円、ZHTクラチセツイリョウ33,482円、カガレン16,000円、社会保険料283,008円、カ)ヤマギシコヒーセンタ616,000円、公金/ノボリベツシッタイドウ154,341円。",
+        numericMemo: "読取行の合計 1,577,019円。差引残高は各行にあり。PDF原本で前後ページを確認してください。",
+        issueMemo: "摘要の読み取りに揺れがあるため、請求書・入金先と照合が必要です。",
+        createdAt: "2026-07-01T00:00:00.000+09:00"
+      },
+      {
+        id: "extract-hitech-202506-zip-visible",
+        documentDate: "2026-06-01",
+        sourceCategory: "ハイテク",
+        sourceFormat: "ZIP",
+        sourceFile: "ハイテク明細　2025.6～.zip",
+        documentTitle: "ハイテク明細 支給額",
+        counterparty: "ハイテク明細",
+        primaryAmount: 467520,
+        taxAmount: "",
+        grossAmount: 467520,
+        rowCount: 1,
+        targetLedger: "ハイテク台帳",
+        linkedRecordId: "hitech-202506-visible-001",
+        status: "反映済",
+        confidence: "中",
+        extractedText: "講師料448,800円、交通費18,720円、総支給額467,520円、控除合計0円、差引支給467,520円、支給額累計1,723,900円、JID45,785。",
+        numericMemo: "448,800 + 18,720 = 467,520円。ハイテク台帳へ反映済み。",
+        issueMemo: "講師名・対象月の詳細は原本ZIP内の明細で確認してください。",
+        createdAt: "2026-07-01T00:00:00.000+09:00"
+      },
+      {
+        id: "extract-bankbook-nmr20260701073104-visible",
+        documentDate: "2026-06-01",
+        sourceCategory: "通帳",
+        sourceFormat: "Excel",
+        sourceFile: "nmr20260701073104",
+        documentTitle: "通帳明細CSV 2026/06/01",
+        counterparty: "ソヨ支店(166)",
+        primaryAmount: 285216,
+        taxAmount: "",
+        grossAmount: 285216,
+        rowCount: 1,
+        targetLedger: "通帳明細",
+        linkedRecordId: "bankbook-nmr20260701073104-20260601-social-insurance",
+        status: "反映済",
+        confidence: "高",
+        extractedText: "照会口座: ソヨ支店(166)。番号1。勘定日2026年06月01日。出金金額285,216円。残高3,200,560円。取引区分: 出金。摘要: シャカイホケンリョウ。",
+        numericMemo: "出金285,216円、残高3,200,560円。社会保険料候補として通帳明細へ反映済み。",
+        issueMemo: "給与・社会保険料資料と照合してください。",
+        createdAt: "2026-07-01T00:00:00.000+09:00"
+      },
+      {
+        id: "extract-web-transfer-20260625-0625003-visible",
+        documentDate: "2026-06-25",
+        sourceCategory: "WEB振込",
+        sourceFormat: "ZIP",
+        sourceFile: "WEB振込2025.6～ (5).zip",
+        documentTitle: "WEB振込 実行結果 受付番号0625003",
+        counterparty: "北海道銀行 道銀ビジネスWEBサービス",
+        primaryAmount: "",
+        taxAmount: "",
+        grossAmount: "",
+        rowCount: 1,
+        targetLedger: "受領書類",
+        linkedRecordId: "received-web-transfer-20260625-0625003",
+        status: "要確認",
+        confidence: "中",
+        extractedText: "状態: 受付済み。処理日時: 2026年06月25日 09時51分52秒。受付番号: 0625003。取引種類: 振込振替。指定日: 2026年06月25日。取引名: 06月25日取引。振込依頼人名: -。支払口座: 雁来支店(166) 普通1226349。",
+        numericMemo: "貼付画像では振込先口座・金額が見えていないため未記入。",
+        issueMemo: "振込先口座・振込金額は原本ZIP/PDFの別ページで確認が必要です。",
+        createdAt: "2026-07-01T00:00:00.000+09:00"
+      }
+    ];
+
+    let added = 0;
+    let updated = 0;
+    records.forEach((record) => {
+      const existing = state.documentExtracts.find((item) => item.id === record.id);
+      if (existing) {
+        Object.assign(existing, record, {
+          createdAt: existing.createdAt || record.createdAt,
+          updatedAt: new Date().toISOString()
+        });
+        updated += 1;
+      } else {
+        state.documentExtracts.push(record);
+        added += 1;
+      }
+    });
+    state.settings.appliedMigrations.push(migrationId);
+    addAudit("資料読取台帳 初期反映", {
+      added,
+      updated,
+      sourceFiles: records.map((item) => item.sourceFile).join(" / ")
     });
   }
 
@@ -2270,6 +2395,7 @@
       expenses: renderExpenses,
       approvals: renderApprovals,
       dataLink: renderDataLink,
+      documentExtracts: renderDocumentExtracts,
       taxAccountant: renderTaxAccountant,
       sales: renderSales,
       invoices: renderInvoices,
@@ -4100,6 +4226,10 @@
     const latest = batches[0];
     const bankbookEntries = (state.bankbookEntries || []).slice().sort(byDate("date"));
     const bankbookUnmatched = bankbookEntries.filter((item) => !["照合済", "対象外"].includes(item.status)).length;
+    const documentExtracts = (state.documentExtracts || [])
+      .slice()
+      .sort((a, b) => String(b.documentDate || b.createdAt || "").localeCompare(String(a.documentDate || a.createdAt || "")));
+    const extractNeedsReview = documentExtracts.filter((item) => item.status === "要確認" || clean(item.issueMemo)).length;
 
     app.innerHTML = `
       <section class="panel">
@@ -4117,15 +4247,29 @@
             ${summaryCard("カードCSV", `${sum(cardBatches, "createdCount")}件`, `${cardBatches.length}回 / カード経費へ登録`)}
             ${summaryCard("取込金額", yen(sum(batches, "amountTotal")), `登録 ${createdCount}件`)}
             ${summaryCard("通帳明細", `${bankbookEntries.length}件`, `未照合 ${bankbookUnmatched}件`)}
+            ${summaryCard("資料読取", `${documentExtracts.length}件`, `要確認 ${extractNeedsReview}件 / ${yen(sum(documentExtracts, "primaryAmount"))}`)}
           </div>
           <div class="notice info" style="margin-top:12px;">
-            通帳CSVは売上一覧へ、カードCSVはカード支払の経費として登録します。取込履歴は税理士提出パックにも含めます。
+            通帳CSVは売上一覧へ、カードCSVはカード支払の経費として登録します。PDF・Excel・ZIP・画像から読めた文字と数字は資料読取台帳に残し、税理士提出パックにも含めます。
           </div>
           <div class="actions" style="margin-top:12px;">
             <button class="button secondary small" data-view-jump="sales" type="button">売上一覧を確認</button>
             <button class="button secondary small" data-view-jump="cards" type="button">カード台帳を確認</button>
+            <button class="button secondary small" data-view-jump="documentExtracts" type="button">資料読取を確認</button>
             <button class="button secondary small" id="exportImportBatchCsv" type="button">取込履歴CSV</button>
           </div>
+        </div>
+      </section>
+      <section class="panel" style="margin-top:14px;">
+        <div class="panel-head">
+          <h2>PDF・Excel・画像の読取結果</h2>
+          <div class="actions">
+            <span class="badge">${documentExtracts.length}件</span>
+            <button class="button secondary small" id="exportDocumentExtractCsvFromDataLink" type="button">読取台帳CSV</button>
+          </div>
+        </div>
+        <div class="panel-body">
+          ${renderDocumentExtractTable(documentExtracts)}
         </div>
       </section>
       <section class="panel" style="margin-top:14px;">
@@ -4155,10 +4299,198 @@
     document.getElementById("dataLinkCardImport").addEventListener("change", importCardCsv);
     document.getElementById("exportImportBatchCsv").addEventListener("click", () => exportCsv("import-history", batches, importBatchCsvFields()));
     document.getElementById("exportBankbookCsv").addEventListener("click", () => exportCsv("bankbook-data", bankbookEntries, bankbookCsvFields()));
+    document.getElementById("exportDocumentExtractCsvFromDataLink").addEventListener("click", () => exportCsv("document-extracts", documentExtracts, documentExtractCsvFields()));
     app.querySelectorAll("[data-view-jump]").forEach((button) => {
       button.addEventListener("click", () => switchView(button.dataset.viewJump));
     });
     bindTableActions();
+  }
+
+  function renderDocumentExtracts() {
+    const rows = (state.documentExtracts || [])
+      .slice()
+      .sort((a, b) => String(b.documentDate || b.createdAt || "").localeCompare(String(a.documentDate || a.createdAt || "")));
+    const reflected = rows.filter((item) => item.status === "反映済");
+    const needsReview = rows.filter((item) => item.status === "要確認" || (item.issueMemo || "").trim());
+
+    app.innerHTML = `
+      <section class="panel">
+        <div class="panel-head">
+          <h2>資料読取結果</h2>
+          <div class="actions">
+            <button class="button secondary small" id="exportDocumentExtractCsv" type="button">読取台帳CSV</button>
+            <button class="button secondary small" data-view-jump="taxAccountant" type="button">税理士連携へ</button>
+          </div>
+        </div>
+        <div class="panel-body">
+          <div class="grid cols-4">
+            ${summaryCard("読取資料", `${rows.length}件`, "PDF・Excel・ZIP・画像・CSV")}
+            ${summaryCard("抽出金額", yen(sum(rows, "primaryAmount")), "読取済みの主金額合計")}
+            ${summaryCard("反映済", `${reflected.length}件`, "台帳・売上・受領書類へ連携")}
+            ${summaryCard("要確認", `${needsReview.length}件`, "金額・相手先・原本確認")}
+          </div>
+          <div class="notice info" style="margin-top:12px;">
+            保存フォルダのリンクだけで終わらせず、PDF・Excel・画像から読めた文字と数字をここに保存します。税理士提出、台帳照合、分類別集計、統計に使うための中間台帳です。
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" style="margin-top:14px;">
+        <div class="panel-head"><h2>読取結果を登録</h2><span class="badge">原本から吸い上げた内容</span></div>
+        <form id="documentExtractForm" class="panel-body form-grid">
+          ${field("documentDate", "資料日付", "date", TODAY)}
+          ${selectField("sourceCategory", "資料分類", documentSourceCategories.map((item) => [item, item]), "通帳")}
+          ${selectField("sourceFormat", "形式", documentSourceFormats.map((item) => [item, item]), "PDF")}
+          ${field("sourceFile", "元ファイル名", "text", "", "例: 202606meisai.pdf")}
+          ${field("documentTitle", "資料名", "text", "", "例: JCBカード明細 2026年6月")}
+          ${field("counterparty", "相手先・口座", "text", "", "例: 道銀 / JCB / 講師名")}
+          ${field("primaryAmount", "主金額", "number", "", "読取金額")}
+          ${field("taxAmount", "税額", "number", "", "消費税・控除額など")}
+          ${field("grossAmount", "総額", "number", "", "税込・総支給など")}
+          ${field("rowCount", "読取行数", "number", "1")}
+          ${selectField("targetLedger", "反映先", documentExtractTargetOptions(), "未選択")}
+          ${field("linkedRecordId", "紐づけID", "text", "", "例: invoice-001 / bankbookEntries:7件")}
+          ${selectField("status", "状態", documentExtractStatuses.map((item) => [item, item]), "読取済")}
+          ${selectField("confidence", "読取確度", documentConfidenceOptions.map((item) => [item, item]), "中")}
+          <label class="field" style="grid-column:1 / -1;"><span>読み取ったテキスト</span><textarea name="extractedText" placeholder="PDFやExcelから吸い上げた本文、摘要、明細の文字を貼り付けます。"></textarea></label>
+          <label class="field" style="grid-column:1 / -1;"><span>数字メモ</span><textarea name="numericMemo" placeholder="金額の内訳、行別合計、税額、控除、残高などを残します。"></textarea></label>
+          <label class="field" style="grid-column:1 / -1;"><span>未確認・確認依頼</span><textarea name="issueMemo" placeholder="読取不能、金額不明、原本確認、税理士確認が必要な内容を残します。"></textarea></label>
+          <div class="actions" style="grid-column:1 / -1;">
+            <button class="button" type="submit">読取結果を保存</button>
+            <button class="button secondary" type="reset">クリア</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="panel" style="margin-top:14px;">
+        <div class="panel-head"><h2>読取台帳</h2><span class="badge">${rows.length}件</span></div>
+        <div class="panel-body">
+          ${renderDocumentExtractTable(rows)}
+        </div>
+      </section>
+
+      <section class="panel" style="margin-top:14px;">
+        <div class="panel-head"><h2>統計用サマリー</h2><span class="badge">分類別</span></div>
+        <div class="panel-body">
+          ${renderDocumentExtractStats(rows)}
+        </div>
+      </section>
+    `;
+
+    document.getElementById("documentExtractForm").addEventListener("submit", createDocumentExtract);
+    document.getElementById("exportDocumentExtractCsv").addEventListener("click", () => exportCsv("document-extracts", rows, documentExtractCsvFields()));
+    app.querySelectorAll("[data-view-jump]").forEach((button) => {
+      button.addEventListener("click", () => switchView(button.dataset.viewJump));
+    });
+    bindTableActions();
+  }
+
+  function documentExtractTargetOptions() {
+    return ["未選択", "通帳明細", "カード台帳", "経費表", "売上", "請求書", "受領書類", "支払依頼", "給与台帳", "ハイテク台帳", "税理士提出資料"].map((item) => [item, item]);
+  }
+
+  function createDocumentExtract(event) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const values = formValues(form);
+    state.documentExtracts = Array.isArray(state.documentExtracts) ? state.documentExtracts : [];
+    const record = {
+      id: uid("doc-extract"),
+      documentDate: values.documentDate || TODAY,
+      sourceCategory: values.sourceCategory || "その他",
+      sourceFormat: values.sourceFormat || "その他",
+      sourceFile: clean(values.sourceFile),
+      documentTitle: clean(values.documentTitle),
+      counterparty: clean(values.counterparty),
+      primaryAmount: hasDisplayValue(values.primaryAmount) ? num(values.primaryAmount) : "",
+      taxAmount: hasDisplayValue(values.taxAmount) ? num(values.taxAmount) : "",
+      grossAmount: hasDisplayValue(values.grossAmount) ? num(values.grossAmount) : "",
+      rowCount: hasDisplayValue(values.rowCount) ? num(values.rowCount) : 0,
+      targetLedger: clean(values.targetLedger) || "未選択",
+      linkedRecordId: clean(values.linkedRecordId),
+      status: values.status || "読取済",
+      confidence: values.confidence || "中",
+      extractedText: clean(values.extractedText),
+      numericMemo: clean(values.numericMemo),
+      issueMemo: clean(values.issueMemo),
+      createdAt: new Date().toISOString()
+    };
+    state.documentExtracts.push(record);
+    addAudit("資料読取結果登録", record);
+    persist("資料読取保存");
+    form.reset();
+    render();
+  }
+
+  function renderDocumentExtractTable(items) {
+    if (!items.length) return `<div class="empty">資料読取結果はまだありません。</div>`;
+    return `
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>資料日付</th><th>分類</th><th>形式</th><th>元ファイル</th><th>資料名</th><th>相手先</th>
+              <th class="num">主金額</th><th class="num">税額</th><th class="num">総額</th><th class="num">行数</th>
+              <th>反映先</th><th>状態</th><th>確度</th><th>未確認</th><th>操作</th>
+            </tr>
+          </thead>
+          <tbody>${items.map((item) => `<tr>
+            <td>${dateOrMissing(item.documentDate)}</td>
+            <td>${displayOrMissing(item.sourceCategory)}</td>
+            <td>${displayOrMissing(item.sourceFormat)}</td>
+            <td>${displayOrMissing(item.sourceFile)}</td>
+            <td>${displayOrMissing(item.documentTitle)}</td>
+            <td>${displayOrMissing(item.counterparty)}</td>
+            <td class="num">${moneyOrMissing(item.primaryAmount)}</td>
+            <td class="num">${moneyOrMissing(item.taxAmount)}</td>
+            <td class="num">${moneyOrMissing(item.grossAmount)}</td>
+            <td class="num">${displayOrMissing(item.rowCount)}</td>
+            <td>${displayOrMissing(item.targetLedger)}</td>
+            <td>${statusBadge(item.status || "読取済")}</td>
+            <td>${bankbookConfidenceBadge(item.confidence)}</td>
+            <td>${(item.issueMemo || "").trim() ? `<strong class="red-note">${esc(item.issueMemo)}</strong>` : '<span class="badge good">なし</span>'}</td>
+            <td>${rowActions("documentExtracts", item.id)}</td>
+          </tr>`).join("")}</tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  function renderDocumentExtractStats(rows) {
+    const byCategory = groupDocumentExtracts(rows, "sourceCategory");
+    const byTarget = groupDocumentExtracts(rows, "targetLedger");
+    return `
+      <div class="grid cols-2">
+        ${renderDocumentExtractStatsTable("資料分類別", byCategory)}
+        ${renderDocumentExtractStatsTable("反映先別", byTarget)}
+      </div>
+    `;
+  }
+
+  function groupDocumentExtracts(rows, key) {
+    const map = new Map();
+    rows.forEach((row) => {
+      const label = clean(row[key]) || "未記入";
+      const current = map.get(label) || { label, count: 0, amount: 0, needsReview: 0 };
+      current.count += 1;
+      current.amount += num(row.primaryAmount);
+      if (row.status === "要確認" || clean(row.issueMemo)) current.needsReview += 1;
+      map.set(label, current);
+    });
+    return [...map.values()].sort((a, b) => b.amount - a.amount || b.count - a.count);
+  }
+
+  function renderDocumentExtractStatsTable(title, rows) {
+    if (!rows.length) return `<div class="empty">${esc(title)}はまだありません。</div>`;
+    return `
+      <div class="table-wrap">
+        <h3>${esc(title)}</h3>
+        <table>
+          <thead><tr><th>区分</th><th class="num">件数</th><th class="num">抽出金額</th><th class="num">要確認</th></tr></thead>
+          <tbody>${rows.map((row) => `<tr><td>${esc(row.label)}</td><td class="num">${row.count}</td><td class="num">${yen(row.amount)}</td><td class="num">${row.needsReview}</td></tr>`).join("")}</tbody>
+        </table>
+      </div>
+    `;
   }
 
   function taxSubmissionStatuses() {
@@ -4177,6 +4509,7 @@
         linkedViews: [
           { view: "sales", label: "売上" },
           { view: "dataLink", label: "データ連携" },
+          { view: "documentExtracts", label: "資料読取" },
           { view: "receivedDocs", label: "受領書類" },
           { view: "hitech", label: "ハイテク台帳" }
         ],
@@ -4194,6 +4527,7 @@
         description: "カード明細とAmazon等の適格請求書をカード台帳・レシート画像と照合します。",
         files: ["カード明細", "202606meisai.pdf", "202607meisai.pdf", "カードインボイス2025.6～.zip　→Amazonの適格請求書"],
         linkedViews: [
+          { view: "documentExtracts", label: "資料読取" },
           { view: "cards", label: "カード台帳" },
           { view: "receipts", label: "レシート管理" },
           { view: "expenses", label: "経費表" }
@@ -4212,6 +4546,7 @@
         description: "売上請求書とカード支払記録簿を売上・請求書番号・入金とつなげます。",
         files: ["売り上げ2025506～.zip", "カード支払い記録簿2025年度.xlsx"],
         linkedViews: [
+          { view: "documentExtracts", label: "資料読取" },
           { view: "invoices", label: "請求書" },
           { view: "sales", label: "売上" },
           { view: "salesFlow", label: "販売管理" }
@@ -4230,6 +4565,7 @@
         description: "お客様月別請求書とCDP宛請求書を、支払依頼・受領書類・経費に紐づけます。",
         files: ["お客様月別請求書CDP2025.6～.zip", "CDP宛請求書2025.6～.zip"],
         linkedViews: [
+          { view: "documentExtracts", label: "資料読取" },
           { view: "paymentRequests", label: "支払依頼" },
           { view: "receivedDocs", label: "受領書類" },
           { view: "expenses", label: "経費表" }
@@ -4248,6 +4584,7 @@
         description: "賃金台帳を給与台帳と照合し、提出用に不足がないか確認します。",
         files: ["賃金台帳2026.zip"],
         linkedViews: [
+          { view: "documentExtracts", label: "資料読取" },
           { view: "payroll", label: "給与台帳" },
           { view: "closing", label: "締め登録" }
         ],
@@ -4319,6 +4656,8 @@
     const checks = taxSubmissionCheckCount(items);
     const readyCount = items.filter((item) => ["提出準備OK", "提出済"].includes(item.status)).length;
     const missingCount = items.filter((item) => !item.driveUrl || !(item.note || "").trim()).length;
+    const documentExtracts = state.documentExtracts || [];
+    const extractNeedsReview = documentExtracts.filter((item) => item.status === "要確認" || clean(item.issueMemo)).length;
 
     app.innerHTML = `
       <div class="grid cols-4">
@@ -4326,19 +4665,22 @@
         ${summaryCard("照合チェック", `${checks.done}/${checks.total}`, "台帳や請求書との紐づけ")}
         ${summaryCard("提出準備", `${readyCount}件`, "提出準備OKまたは提出済")}
         ${summaryCard("未記入注意", `${missingCount}件`, "リンクまたはメモの不足")}
+        ${summaryCard("資料読取", `${documentExtracts.length}件`, `要確認 ${extractNeedsReview}件 / ${yen(sum(documentExtracts, "primaryAmount"))}`)}
       </div>
 
       <section class="panel" style="margin-top:14px;">
         <div class="panel-head">
           <h2>税理士提出資料の連携</h2>
           <div class="actions">
+            <button class="button secondary small" id="exportTaxDocumentExtractCsv" type="button">読取台帳CSV</button>
             <button class="button secondary small" id="exportTaxSubmissionHtml" type="button">提出一覧HTML</button>
+            <button class="button secondary small" data-view-jump="documentExtracts" type="button">資料読取へ</button>
             <button class="button secondary small" data-view-jump="closing" type="button">締め登録へ</button>
           </div>
         </div>
         <div class="panel-body">
           <div class="notice info">
-            ここでは提出予定の資料を「どの台帳・売上・支払と照合するか」まで管理します。各資料の詳細を後から貼り付ける場合は、該当カードの詳細メモに追記してください。
+            ここでは提出予定の資料を「どの台帳・売上・支払と照合するか」まで管理します。各資料の中身は資料読取台帳にテキスト・数字として保存し、リンクだけで終わらせない運用にします。
           </div>
           <div class="tax-pack-layout">
             ${items.map(renderTaxSubmissionCard).join("")}
@@ -4348,6 +4690,8 @@
     `;
 
     bindTaxAccountantActions();
+    const extractCsvButton = document.getElementById("exportTaxDocumentExtractCsv");
+    if (extractCsvButton) extractCsvButton.addEventListener("click", () => exportCsv("tax-document-extracts", documentExtracts, documentExtractCsvFields()));
   }
 
   function renderTaxSubmissionCard(item) {
@@ -4378,6 +4722,8 @@
           <strong>提出予定ファイル</strong>
           <ul>${(item.files || []).map((file) => `<li>${esc(file)}</li>`).join("")}</ul>
         </div>
+
+        ${renderTaxSubmissionExtracts(item)}
 
         <div class="tax-pack-links">
           <strong>照合する画面</strong>
@@ -4410,6 +4756,55 @@
           `).join("")}
         </div>
       </article>
+    `;
+  }
+
+  function taxExtractsForSubmission(itemId) {
+    const rows = state.documentExtracts || [];
+    const categoryMap = {
+      bank: ["通帳", "WEB振込", "ハイテク"],
+      jcb: ["クレジットカード"],
+      sales: ["売上請求書"],
+      payables: ["支払請求書", "受領書類"],
+      payroll: ["賃金"]
+    };
+    const targetMap = {
+      bank: ["通帳明細", "ハイテク台帳", "受領書類"],
+      jcb: ["カード台帳", "経費表"],
+      sales: ["売上", "請求書"],
+      payables: ["支払依頼", "受領書類", "経費表"],
+      payroll: ["給与台帳"]
+    };
+    const categories = categoryMap[itemId] || [];
+    const targets = targetMap[itemId] || [];
+    return rows
+      .filter((row) => categories.includes(row.sourceCategory) || targets.includes(row.targetLedger))
+      .sort((a, b) => String(b.documentDate || b.createdAt || "").localeCompare(String(a.documentDate || a.createdAt || "")));
+  }
+
+  function renderTaxSubmissionExtracts(item) {
+    const rows = taxExtractsForSubmission(item.id);
+    if (!rows.length) {
+      return `
+        <div class="tax-pack-file-list">
+          <strong>読取済みデータ</strong>
+          <p><strong class="red-note">未記入</strong> PDF・Excel・画像から吸い上げたテキストや数字がまだありません。</p>
+        </div>
+      `;
+    }
+    return `
+      <div class="tax-pack-file-list">
+        <strong>読取済みデータ</strong>
+        <ul>${rows.slice(0, 5).map((row) => `
+          <li>
+            ${esc(formatDate(row.documentDate))} / ${esc(row.sourceFile || row.documentTitle || row.sourceCategory)}
+            / ${moneyOrMissing(row.primaryAmount)}
+            / ${statusBadge(row.status || "読取済")}
+            ${clean(row.issueMemo) ? ` / <strong class="red-note">${esc(row.issueMemo)}</strong>` : ""}
+          </li>
+        `).join("")}</ul>
+        ${rows.length > 5 ? `<p class="muted">ほか ${rows.length - 5}件</p>` : ""}
+      </div>
     `;
   }
 
@@ -5193,6 +5588,7 @@
     if (collection === "receivedDocs") return [record.receivedDate, record.dueDate].filter(Boolean);
     if (collection === "paymentRequests") return [record.requestDate, record.dueDate, record.paidAt].filter(Boolean);
     if (collection === "importBatches") return [record.importedAt].filter(Boolean);
+    if (collection === "documentExtracts") return [record.documentDate, record.createdAt].filter(Boolean);
     if (collection === "partners" || collection === "items" || collection === "recurringDocs") return [];
     if (collection === "payroll") return [record.payDate, record.payMonth ? `${record.payMonth}-01` : ""].filter(Boolean);
     if (collection === "closings") return [record.month ? `${record.month}-01` : ""].filter(Boolean);
@@ -5205,6 +5601,7 @@
     if (collection === "receivedDocs") return [record.documentType, record.vendor, record.title, record.status].filter(Boolean).join(" / ");
     if (collection === "paymentRequests") return [record.requestNo, record.vendor, record.content, record.status].filter(Boolean).join(" / ");
     if (collection === "importBatches") return [record.fileName, importTargetLabel(record.target), record.createdCount ? `${record.createdCount}件` : "", record.status].filter(Boolean).join(" / ");
+    if (collection === "documentExtracts") return [record.sourceCategory, record.documentTitle || record.sourceFile, record.status].filter(Boolean).join(" / ");
     if (collection === "sales") return [record.customer, record.content, record.invoiceNo].filter(Boolean).join(" / ");
     if (collection === "invoices") return [record.invoiceNo, record.customer, record.content].filter(Boolean).join(" / ");
     if (collection === "estimates") return [record.estimateNo, record.customer, record.content].filter(Boolean).join(" / ");
@@ -5226,6 +5623,7 @@
       receivedDocs: "受領書類",
       paymentRequests: "申請・承認",
       importBatches: "データ連携",
+      documentExtracts: "資料読取",
       sales: "売上",
       invoices: "請求書",
       estimates: "見積",
@@ -5594,6 +5992,7 @@
     if (target === "sales") return "売上一覧";
     if (target === "expenses") return "経費表・カード台帳";
     if (target === "receivedDocs") return "受領書類";
+    if (target === "documentExtracts") return "資料読取";
     return target || "";
   }
 
@@ -5951,7 +6350,20 @@
     alerts.push(...expenseAlerts(fiscalExpenses));
     alerts.push(...receivedDocAlerts());
     alerts.push(...paymentRequestAlerts());
+    alerts.push(...documentExtractAlerts());
     alerts.push(...getInvoiceIssues());
+    return alerts;
+  }
+
+  function documentExtractAlerts() {
+    const alerts = [];
+    const rows = fiscalItems(state.documentExtracts || [], "documentDate");
+    const needsReview = rows.filter((item) => item.status === "要確認" || clean(item.issueMemo));
+    const missingCore = rows.filter((item) => {
+      return !hasDisplayValue(item.sourceFile) || !hasDisplayValue(item.documentTitle) || !hasDisplayValue(item.primaryAmount) || !hasDisplayValue(item.targetLedger) || item.targetLedger === "未選択";
+    });
+    if (needsReview.length) alerts.push({ severity: "warn", title: "資料読取の要確認", body: `${needsReview.length}件あります。PDF・Excel・ZIP元資料と読取結果の金額・日付・反映先を確認してください。` });
+    if (missingCore.length) alerts.push({ severity: "bad", title: "資料読取の未記入", body: `${missingCore.length}件で元ファイル名・資料名・主金額・反映先のいずれかが未記入です。税理士提出前に補完してください。` });
     return alerts;
   }
 
@@ -6362,6 +6774,27 @@
         <label class="field" style="grid-column:1 / -1;"><span>メモ</span><textarea name="note">${esc(item.note || "")}</textarea></label>
       `;
     }
+    if (collection === "documentExtracts") {
+      return `
+        ${field("documentDate", "資料日付", "date", item.documentDate || TODAY)}
+        ${selectField("sourceCategory", "資料分類", documentSourceCategories.map((entry) => [entry, entry]), item.sourceCategory || "その他")}
+        ${selectField("sourceFormat", "形式", documentSourceFormats.map((entry) => [entry, entry]), item.sourceFormat || "その他")}
+        ${field("sourceFile", "元ファイル名", "text", item.sourceFile || "")}
+        ${field("documentTitle", "資料名", "text", item.documentTitle || "")}
+        ${field("counterparty", "相手先・口座", "text", item.counterparty || "")}
+        ${field("primaryAmount", "主金額", "number", hasDisplayValue(item.primaryAmount) ? item.primaryAmount : "")}
+        ${field("taxAmount", "税額", "number", hasDisplayValue(item.taxAmount) ? item.taxAmount : "")}
+        ${field("grossAmount", "総額", "number", hasDisplayValue(item.grossAmount) ? item.grossAmount : "")}
+        ${field("rowCount", "読取行数", "number", hasDisplayValue(item.rowCount) ? item.rowCount : "")}
+        ${selectField("targetLedger", "反映先", documentExtractTargetOptions(), item.targetLedger || "未選択")}
+        ${field("linkedRecordId", "紐づけID", "text", item.linkedRecordId || "")}
+        ${selectField("status", "状態", documentExtractStatuses.map((entry) => [entry, entry]), item.status || "読取済")}
+        ${selectField("confidence", "読取確度", documentConfidenceOptions.map((entry) => [entry, entry]), item.confidence || "中")}
+        <label class="field" style="grid-column:1 / -1;"><span>読み取ったテキスト</span><textarea name="extractedText">${esc(item.extractedText || "")}</textarea></label>
+        <label class="field" style="grid-column:1 / -1;"><span>数字メモ</span><textarea name="numericMemo">${esc(item.numericMemo || "")}</textarea></label>
+        <label class="field" style="grid-column:1 / -1;"><span>未確認・確認依頼</span><textarea name="issueMemo">${esc(item.issueMemo || "")}</textarea></label>
+      `;
+    }
     if (collection === "sales") {
       return `
         ${field("date", "入金日", "date", item.date || TODAY)}
@@ -6540,7 +6973,7 @@
     const before = JSON.parse(JSON.stringify(item));
     const data = formValues(form);
     const formData = new FormData(form);
-    const numericFields = ["quantity", "unitPrice", "amount", "mileage", "fuelClaim", "lodging", "total", "basePay", "allowance", "deduction", "netPay", "dayOfMonth"];
+    const numericFields = ["quantity", "unitPrice", "amount", "mileage", "fuelClaim", "lodging", "total", "basePay", "allowance", "deduction", "netPay", "dayOfMonth", "primaryAmount", "taxAmount", "grossAmount", "rowCount"];
 
     Object.entries(data).forEach(([key, value]) => {
       if (key === "proof" || key === "file" || key === "invoiceEligible") return;
@@ -6628,6 +7061,7 @@
       paymentRequests: fiscalItems(state.paymentRequests || [], "requestDate"),
       importBatches: fiscalItems(state.importBatches || [], "importDate"),
       bankbookEntries: state.bankbookEntries || [],
+      documentExtracts: state.documentExtracts || [],
       sales: fiscalItems(state.sales, "date"),
       invoices: fiscalInvoices(),
       estimates: fiscalItems(state.estimates, "date"),
@@ -6661,6 +7095,8 @@
     const bankbookUnmatched = bankbookEntries.filter((item) => !["照合済", "対象外"].includes(item.status)).length;
     const hitechRows = fiscalItems(state.hitech || [], "date");
     const hitechPending = hitechRows.filter((item) => item.status !== "完了").length;
+    const documentExtracts = state.documentExtracts || [];
+    const extractNeedsReview = documentExtracts.filter((item) => item.status === "要確認" || clean(item.issueMemo)).length;
     const alerts = getAlerts();
     const health = getDataHealth();
     const categoryRows = summarizeExpenses(expenses);
@@ -6687,10 +7123,13 @@
     <tr><th>請求書</th><td>${yen(sum(invoices, "amount"))} / ${invoices.length}件</td></tr>
     <tr><th>通帳明細読み取り</th><td>${bankbookEntries.length}件 / 未照合 ${bankbookUnmatched}件</td></tr>
     <tr><th>ハイテク明細</th><td>${hitechRows.length}件 / 未完了 ${hitechPending}件</td></tr>
+    <tr><th>資料読取</th><td>${documentExtracts.length}件 / 要確認 ${extractNeedsReview}件 / 抽出金額 ${yen(sum(documentExtracts, "primaryAmount"))}</td></tr>
     <tr><th>未確認</th><td>${alerts.length}件</td></tr>
   </tbody></table>
   <h2>要確認事項</h2>
   ${alerts.length ? `<table><thead><tr><th>重要度</th><th>項目</th><th>内容</th></tr></thead><tbody>${alerts.map((alert) => `<tr><td class="${alert.severity === "bad" ? "bad" : "warn"}">${alert.severity === "bad" ? "要対応" : "確認"}</td><td>${esc(alert.title)}</td><td>${esc(alert.body)}</td></tr>`).join("")}</tbody></table>` : "<p>提出前の大きな未確認はありません。</p>"}
+  <h2>資料読取台帳</h2>
+  ${documentExtracts.length ? `<table><thead><tr><th>資料日付</th><th>分類</th><th>元ファイル</th><th>資料名</th><th>反映先</th><th class="num">主金額</th><th>状態</th><th>未確認・確認依頼</th></tr></thead><tbody>${documentExtracts.map((row) => `<tr><td>${esc(formatDate(row.documentDate))}</td><td>${esc(row.sourceCategory || "")}</td><td>${esc(row.sourceFile || "")}</td><td>${esc(row.documentTitle || "")}</td><td>${esc(row.targetLedger || "")}</td><td class="num">${hasDisplayValue(row.primaryAmount) ? yen(row.primaryAmount) : '<strong class="bad">未記入</strong>'}</td><td>${esc(row.status || "")}</td><td>${clean(row.issueMemo) ? `<strong class="bad">${esc(row.issueMemo)}</strong>` : ""}</td></tr>`).join("")}</tbody></table>` : "<p>資料読取台帳はありません。</p>"}
   <h2>経費分類</h2>
   ${categoryRows.length ? `<table><thead><tr><th>科目</th><th class="num">金額</th><th class="num">構成比</th></tr></thead><tbody>${categoryRows.map((row) => `<tr><td>${esc(row.category)}</td><td class="num">${yen(row.amount)}</td><td class="num">${row.percent.toFixed(1)}%</td></tr>`).join("")}</tbody></table>` : "<p>経費データはありません。</p>"}
   <h2>請求書と売上の扱い</h2>
@@ -8090,6 +8529,30 @@
     ];
   }
 
+  function documentExtractCsvFields() {
+    return [
+      ["documentDate", "資料日付"],
+      ["sourceCategory", "資料分類"],
+      ["sourceFormat", "形式"],
+      ["sourceFile", "元ファイル名"],
+      ["documentTitle", "資料名"],
+      ["counterparty", "相手先・口座"],
+      ["primaryAmount", "主金額"],
+      ["taxAmount", "税額"],
+      ["grossAmount", "総額"],
+      ["rowCount", "読取行数"],
+      ["targetLedger", "反映先"],
+      ["linkedRecordId", "紐づけID"],
+      ["status", "状態"],
+      ["confidence", "読取確度"],
+      ["extractedText", "読み取ったテキスト"],
+      ["numericMemo", "数字メモ"],
+      ["issueMemo", "未確認・確認依頼"],
+      ["createdAt", "登録日時"],
+      ["updatedAt", "更新日時"]
+    ];
+  }
+
   function importBatchCsvFields() {
     return [
       ["importedAt", "取込日時"],
@@ -9054,11 +9517,11 @@
   }
 
   function moneyOrMissing(value) {
-    return hasDisplayValue(value) && num(value) ? yen(value) : missingValueHtml();
+    return hasDisplayValue(value) ? yen(value) : missingValueHtml();
   }
 
   function displayValueHtml(key, value) {
-    const moneyKeys = ["amount", "amountTotal", "unitPrice", "fuelClaim", "lodging", "total", "basePay", "allowance", "deduction", "netPay", "debit", "credit", "balance", "previous", "current", "diff"];
+    const moneyKeys = ["amount", "amountTotal", "unitPrice", "fuelClaim", "lodging", "total", "basePay", "allowance", "deduction", "netPay", "debit", "credit", "balance", "previous", "current", "diff", "primaryAmount", "taxAmount", "grossAmount"];
     if (moneyKeys.includes(key) && !hasDisplayValue(value)) return missingValueHtml();
     const displayed = displayValue(key, value);
     return hasDisplayValue(displayed) ? esc(displayed) : missingValueHtml();
@@ -9068,7 +9531,7 @@
     if (value === null || value === undefined) return "";
     if (Array.isArray(value)) return key === "lines" ? documentLinesSummary(value) : JSON.stringify(value);
     if (key.toLowerCase().includes("date") || key === "createdAt" || key === "deletedAt" || key === "at") return String(value).includes("T") ? formatDateTime(value) : formatDate(value);
-    if (["amount", "amountTotal", "unitPrice", "fuelClaim", "lodging", "total", "basePay", "allowance", "deduction", "netPay", "debit", "credit", "balance", "previous", "current", "diff"].includes(key)) return yen(value);
+    if (["amount", "amountTotal", "unitPrice", "fuelClaim", "lodging", "total", "basePay", "allowance", "deduction", "netPay", "debit", "credit", "balance", "previous", "current", "diff", "primaryAmount", "taxAmount", "grossAmount"].includes(key)) return yen(value);
     if (key === "paymentMethod") return paymentLabel(value);
     if (key === "expenseEligibility") return expenseEligibilityLabel(value);
     if (key === "sourceType") return value === "bank" ? "通帳" : value === "card" ? "カード" : value === "web-transfer" ? "WEB振込" : String(value);
@@ -9094,7 +9557,22 @@
       importedAt: "取込日時",
       importDate: "取込日",
       sourceType: "取込種別",
+      sourceCategory: "資料分類",
+      sourceFormat: "形式",
+      sourceFile: "元ファイル名",
       fileName: "ファイル名",
+      documentDate: "資料日付",
+      documentTitle: "資料名",
+      counterparty: "相手先・口座",
+      primaryAmount: "主金額",
+      taxAmount: "税額",
+      grossAmount: "総額",
+      targetLedger: "反映先",
+      linkedRecordId: "紐づけID",
+      confidence: "読取確度",
+      extractedText: "読み取ったテキスト",
+      numericMemo: "数字メモ",
+      issueMemo: "未確認・確認依頼",
       rowCount: "読取行",
       createdCount: "登録件数",
       amountTotal: "取込金額",
