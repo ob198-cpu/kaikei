@@ -42,7 +42,7 @@
   const expenseEligibilityEditOptions = expenseEligibilityOptions.filter(([value]) => value !== "auto");
   const invoiceStatuses = ["未入金", "入金予定", "入金済", "保留"];
   const paymentRequestStatuses = ["下書き", "申請中", "差し戻し", "承認済", "支払済"];
-  const receivedDocTypes = ["請求書", "領収書", "納品書", "見積書", "契約書", "その他"];
+  const receivedDocTypes = ["請求書", "領収書", "納品書", "見積書", "契約書", "振込実行結果", "その他"];
   const receivedDocStatuses = ["未確認", "保管", "支払依頼待ち", "申請中", "承認済", "支払済"];
   const ledgerStatuses = ["未処理", "確認中", "完了", "保留"];
   const paymentMethods = [
@@ -134,6 +134,7 @@
     applyBundledBankbookMigrations();
     applyBundledBankbookNmrMigrations();
     applyBundledHitechMigrations();
+    applyBundledWebTransferMigrations();
     applyExpenseEligibilityDefaults();
     persist("自動保存");
     render();
@@ -437,6 +438,83 @@
       added: existing ? 0 : 1,
       updated: existing ? 1 : 0
     });
+  }
+
+  function applyBundledWebTransferMigrations() {
+    const migrationId = "web-transfer-20260625-0625003-visible-v1";
+    state.settings.appliedMigrations = Array.isArray(state.settings.appliedMigrations) ? state.settings.appliedMigrations : [];
+    if (state.settings.appliedMigrations.includes(migrationId)) return;
+
+    state.receivedDocs = Array.isArray(state.receivedDocs) ? state.receivedDocs : [];
+    state.importBatches = Array.isArray(state.importBatches) ? state.importBatches : [];
+
+    const receivedDoc = bundledWebTransfer20260625ReceivedDoc();
+    const batch = bundledWebTransfer20260625ImportBatch();
+    const existingDoc = state.receivedDocs.find((item) => item.id === receivedDoc.id);
+    const existingBatch = state.importBatches.find((item) => item.id === batch.id);
+
+    if (existingDoc) {
+      Object.assign(existingDoc, receivedDoc, {
+        createdAt: existingDoc.createdAt || receivedDoc.createdAt,
+        updatedAt: new Date().toISOString()
+      });
+    } else {
+      state.receivedDocs.push(receivedDoc);
+    }
+
+    if (existingBatch) {
+      Object.assign(existingBatch, batch, {
+        createdAt: existingBatch.createdAt || batch.createdAt,
+        updatedAt: new Date().toISOString()
+      });
+    } else {
+      state.importBatches.push(batch);
+    }
+
+    state.settings.appliedMigrations.push(migrationId);
+    addAudit("WEB振込実行結果 読み取り反映", {
+      sourceFile: "WEB振込2025.6～ (5).zip",
+      receivedDocs: existingDoc ? "更新" : "追加",
+      importBatches: existingBatch ? "更新" : "追加",
+      receiptNo: "0625003"
+    });
+  }
+
+  function bundledWebTransfer20260625ReceivedDoc() {
+    return {
+      id: "received-web-transfer-20260625-0625003",
+      receivedDate: "2026-06-25",
+      documentType: "振込実行結果",
+      vendor: "北海道銀行 道銀ビジネスWEBサービス",
+      title: "WEB振込 受付番号0625003",
+      amount: "",
+      dueDate: "",
+      category: "未分類",
+      department: "共通費",
+      status: "未確認",
+      paymentRequestNo: "",
+      paymentRequestStatus: "",
+      file: null,
+      note: "元資料: WEB振込2025.6～ (5).zip。状態: 受付済み。処理日時: 2026年06月25日 09時51分52秒。取引種類: 振込振替。指定日: 2026年06月25日。取引名: 06月25日取引。振込依頼人名: -。支払口座: 雁来支店(166) 普通 1226349。振込先口座・金額は貼付画像では未確認のため、原本ZIPの下部または別ページで確認してください。",
+      createdAt: "2026-07-01T00:00:00.000+09:00"
+    };
+  }
+
+  function bundledWebTransfer20260625ImportBatch() {
+    return {
+      id: "import-web-transfer-20260625-0625003",
+      importedAt: "2026-07-01T00:00:00.000+09:00",
+      importDate: "2026-06-25",
+      sourceType: "web-transfer",
+      fileName: "WEB振込2025.6～ (5).zip",
+      rowCount: 1,
+      createdCount: 1,
+      amountTotal: "",
+      target: "receivedDocs",
+      status: "確認中",
+      note: "受付番号0625003 / 受付済み / 指定日2026年06月25日 / 支払口座 雁来支店(166) 普通1226349。振込先・金額は未確認。",
+      createdAt: "2026-07-01T00:00:00.000+09:00"
+    };
   }
 
   function bundledHitech202506Detail() {
@@ -4099,6 +4177,7 @@
         linkedViews: [
           { view: "sales", label: "売上" },
           { view: "dataLink", label: "データ連携" },
+          { view: "receivedDocs", label: "受領書類" },
           { view: "hitech", label: "ハイテク台帳" }
         ],
         checks: [
@@ -5345,8 +5424,8 @@
       <div class="table-wrap"><table>
         <thead><tr><th>受領日</th><th>種別</th><th>発行元</th><th>件名</th><th class="num">金額</th><th>支払期限</th><th>状態</th><th>ファイル</th><th>支払依頼</th><th>操作</th></tr></thead>
         <tbody>${items.map((item) => `<tr>
-          <td>${esc(formatDate(item.receivedDate))}</td><td>${esc(item.documentType || "")}</td><td>${esc(item.vendor || "")}</td><td>${esc(item.title || "")}</td>
-          <td class="num">${yen(item.amount)}</td><td>${esc(formatDate(item.dueDate))}</td><td>${statusBadge(item.status)}</td>
+          <td>${dateOrMissing(item.receivedDate)}</td><td>${displayOrMissing(item.documentType)}</td><td>${displayOrMissing(item.vendor)}</td><td>${displayOrMissing(item.title)}</td>
+          <td class="num">${moneyOrMissing(item.amount)}</td><td>${dateOrMissing(item.dueDate)}</td><td>${statusBadge(item.status)}</td>
           <td>${receivedDocFileCell(item)}</td><td>${receivedDocPaymentRequestCell(item)}</td><td>${rowActions("receivedDocs", item.id)}</td>
         </tr>`).join("")}</tbody>
       </table></div>
@@ -5443,7 +5522,7 @@
             <td>${esc(item.fileName || "")}</td>
             <td class="num">${esc(item.rowCount || 0)}</td>
             <td class="num">${esc(item.createdCount || 0)}</td>
-            <td class="num">${yen(item.amountTotal)}</td>
+            <td class="num">${moneyOrMissing(item.amountTotal)}</td>
             <td>${esc(importTargetLabel(item.target))}</td>
             <td>${statusBadge(item.status || "取込済")}</td>
             <td>${esc(item.note || "")}</td>
@@ -5507,12 +5586,14 @@
   function importSourceBadge(sourceType) {
     if (sourceType === "bank") return '<span class="badge bank">通帳</span>';
     if (sourceType === "card") return '<span class="badge card">カード</span>';
+    if (sourceType === "web-transfer") return '<span class="badge bank">WEB振込</span>';
     return '<span class="badge">CSV</span>';
   }
 
   function importTargetLabel(target) {
     if (target === "sales") return "売上一覧";
     if (target === "expenses") return "経費表・カード台帳";
+    if (target === "receivedDocs") return "受領書類";
     return target || "";
   }
 
@@ -8990,7 +9071,7 @@
     if (["amount", "amountTotal", "unitPrice", "fuelClaim", "lodging", "total", "basePay", "allowance", "deduction", "netPay", "debit", "credit", "balance", "previous", "current", "diff"].includes(key)) return yen(value);
     if (key === "paymentMethod") return paymentLabel(value);
     if (key === "expenseEligibility") return expenseEligibilityLabel(value);
-    if (key === "sourceType") return value === "bank" ? "通帳" : value === "card" ? "カード" : String(value);
+    if (key === "sourceType") return value === "bank" ? "通帳" : value === "card" ? "カード" : value === "web-transfer" ? "WEB振込" : String(value);
     if (key === "target") return importTargetLabel(value);
     if (typeof value === "boolean") return value ? "はい" : "いいえ";
     return String(value);
