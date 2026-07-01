@@ -132,6 +132,7 @@
     bindGlobalEvents();
     applyBundledReceiptMigrations();
     applyBundledBankbookMigrations();
+    applyBundledBankbookNmrMigrations();
     applyBundledHitechMigrations();
     applyExpenseEligibilityDefaults();
     persist("自動保存");
@@ -372,6 +373,46 @@
         added: addedCount
       });
     }
+  }
+
+  function applyBundledBankbookNmrMigrations() {
+    const migrationId = "bankbook-nmr20260701073104-visible-v1";
+    state.settings.appliedMigrations = Array.isArray(state.settings.appliedMigrations) ? state.settings.appliedMigrations : [];
+    if (state.settings.appliedMigrations.includes(migrationId)) return;
+
+    state.bankbookEntries = Array.isArray(state.bankbookEntries) ? state.bankbookEntries : [];
+    const record = {
+      id: "bankbook-nmr20260701073104-20260601-social-insurance",
+      date: "2026-06-01",
+      statementDateText: "2026年06月01日",
+      sourceFile: "nmr20260701073104",
+      sourcePage: "貼付画像 1行目",
+      direction: "出金",
+      summary: "社会保険料",
+      amount: 285216,
+      balance: 3200560,
+      classification: "社会保険料",
+      status: "未照合",
+      linkedTo: "",
+      confidence: "高",
+      note: "照会口座: ソヨ支店(166)。番号: 1。取引区分: 出金。摘要は画像上の「シャカイホケンリョウ」から社会保険料として登録。給与・社会保険関係資料と照合してください。",
+      createdAt: "2026-07-01T00:00:00.000+09:00"
+    };
+    const existing = state.bankbookEntries.find((item) => item.id === record.id);
+    if (existing) {
+      Object.assign(existing, record, {
+        createdAt: existing.createdAt || record.createdAt,
+        updatedAt: new Date().toISOString()
+      });
+    } else {
+      state.bankbookEntries.push(record);
+    }
+    state.settings.appliedMigrations.push(migrationId);
+    addAudit("通帳明細読み取り結果反映", {
+      sourceFile: record.sourceFile,
+      added: existing ? 0 : 1,
+      updated: existing ? 1 : 0
+    });
   }
 
   function applyBundledHitechMigrations() {
@@ -3997,7 +4038,7 @@
             ${summaryCard("通帳CSV", `${sum(bankBatches, "createdCount")}件`, `${bankBatches.length}回 / 売上一覧へ登録`)}
             ${summaryCard("カードCSV", `${sum(cardBatches, "createdCount")}件`, `${cardBatches.length}回 / カード経費へ登録`)}
             ${summaryCard("取込金額", yen(sum(batches, "amountTotal")), `登録 ${createdCount}件`)}
-            ${summaryCard("通帳PDF", `${bankbookEntries.length}件`, `未照合 ${bankbookUnmatched}件`)}
+            ${summaryCard("通帳明細", `${bankbookEntries.length}件`, `未照合 ${bankbookUnmatched}件`)}
           </div>
           <div class="notice info" style="margin-top:12px;">
             通帳CSVは売上一覧へ、カードCSVはカード支払の経費として登録します。取込履歴は税理士提出パックにも含めます。
@@ -4017,10 +4058,10 @@
       </section>
       <section class="panel" style="margin-top:14px;">
         <div class="panel-head">
-          <h2>通帳PDF読み取り結果</h2>
+          <h2>通帳明細読み取り結果</h2>
           <div class="actions">
             <span class="badge">${bankbookEntries.length}件</span>
-            <button class="button secondary small" id="exportBankbookCsv" type="button">通帳PDF CSV</button>
+            <button class="button secondary small" id="exportBankbookCsv" type="button">通帳明細 CSV</button>
           </div>
         </div>
         <div class="panel-body">
@@ -4035,7 +4076,7 @@
     document.getElementById("dataLinkSalesImport").addEventListener("change", importSalesCsv);
     document.getElementById("dataLinkCardImport").addEventListener("change", importCardCsv);
     document.getElementById("exportImportBatchCsv").addEventListener("click", () => exportCsv("import-history", batches, importBatchCsvFields()));
-    document.getElementById("exportBankbookCsv").addEventListener("click", () => exportCsv("bankbook-pdf", bankbookEntries, bankbookCsvFields()));
+    document.getElementById("exportBankbookCsv").addEventListener("click", () => exportCsv("bankbook-data", bankbookEntries, bankbookCsvFields()));
     app.querySelectorAll("[data-view-jump]").forEach((button) => {
       button.addEventListener("click", () => switchView(button.dataset.viewJump));
     });
@@ -5414,7 +5455,7 @@
   }
 
   function renderBankbookEntryTable(items) {
-    if (!items.length) return `<div class="empty">通帳PDFの読み取り結果はまだありません。</div>`;
+    if (!items.length) return `<div class="empty">通帳明細の読み取り結果はまだありません。</div>`;
     return `
       <div class="table-wrap">
         <table>
@@ -6563,7 +6604,7 @@
     <tr><th>経費合計</th><td>${yen(sum(expenses, "amount"))} / ${expenses.length}件</td></tr>
     <tr><th>売上入金</th><td>${yen(sum(sales, "amount"))} / ${sales.length}件</td></tr>
     <tr><th>請求書</th><td>${yen(sum(invoices, "amount"))} / ${invoices.length}件</td></tr>
-    <tr><th>通帳PDF読み取り</th><td>${bankbookEntries.length}件 / 未照合 ${bankbookUnmatched}件</td></tr>
+    <tr><th>通帳明細読み取り</th><td>${bankbookEntries.length}件 / 未照合 ${bankbookUnmatched}件</td></tr>
     <tr><th>ハイテク明細</th><td>${hitechRows.length}件 / 未完了 ${hitechPending}件</td></tr>
     <tr><th>未確認</th><td>${alerts.length}件</td></tr>
   </tbody></table>
