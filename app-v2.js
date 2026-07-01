@@ -3271,9 +3271,25 @@
   }
 
   async function runBrowserTextDetectorOcr(file) {
+    const prepared = await prepareLocalOcrImage(file);
+    const whole = await recognizeBrowserTextDetectorImage(prepared.image || file);
+    const tileCandidates = shouldRunLocalOcrTiles(prepared.image, whole.text)
+      ? await buildBrowserTextDetectorTileCandidates(prepared.image, file.name)
+      : [];
+    const textParts = [whole.text || ""]
+      .concat(tileCandidates.map((candidate) => `--- ${candidate.label || "tile"} ---\n${candidate.text || ""}`))
+      .filter((part) => clean(part));
+    return {
+      text: textParts.join("\n\n"),
+      lines: whole.lines || [],
+      candidates: tileCandidates
+    };
+  }
+
+  async function recognizeBrowserTextDetectorImage(image) {
     const Detector = window.TextDetector;
     const detector = new Detector();
-    const bitmap = await createImageBitmap(file);
+    const bitmap = await createImageBitmap(image);
     const detections = await detector.detect(bitmap);
     if (bitmap.close) bitmap.close();
     return {
@@ -3283,6 +3299,26 @@
         return { text, ...normalizeOcrBox(item) };
       }).filter((line) => line.text)
     };
+  }
+
+  async function buildBrowserTextDetectorTileCandidates(canvas, fileName) {
+    const tiles = createLocalOcrTiles(canvas, fileName);
+    const candidates = [];
+    for (let index = 0; index < tiles.length; index += 1) {
+      const tile = tiles[index];
+      const result = await recognizeBrowserTextDetectorImage(tile.image);
+      const text = cleanMultiline(result.text || "");
+      if (localOcrReceiptEvidenceScore(text) < 2) continue;
+      candidates.push({
+        label: tile.label,
+        text,
+        lines: result.lines || [],
+        proof: tile.proof,
+        fileName: `${fileName || "image"} / ${tile.label}`,
+        sourceKind: "browser OCR split"
+      });
+    }
+    return dedupeLocalOcrPayloadCandidates(candidates);
   }
 
   function extractTesseractLines(data) {
@@ -4034,13 +4070,30 @@
   }
 
   function ocrAmountLooksAmbiguous(source, selectedAmount, moneyCandidates) {
-    const strongValues = [...new Set((moneyCandidates || [])
-      .filter((candidate) => candidate.score >= 4)
-      .map((candidate) => candidate.value))]
-      .filter((value) => value > 0);
-    if (strongValues.length >= 2 && !strongValues.includes(selectedAmount)) return true;
+    const candidates = moneyCandidates || collectOcrMoneyCandidates(source);
+    const bestByLine = new Map();
+    candidates
+      .filter((candidate) => candidate.score >= 4 && candidate.value > 0)
+      .forEach((candidate) => {
+        const lineKey = `${candidate.index}:${candidate.line || ""}`;
+        const existing = bestByLine.get(lineKey);
+        if (!existing || candidate.score > existing.score || (candidate.score === existing.score && candidate.value > existing.value)) {
+          bestByLine.set(lineKey, candidate);
+        }
+      });
+    const lineCandidates = [...bestByLine.values()];
+    if (lineCandidates.length) {
+      const topScore = Math.max(...lineCandidates.map((candidate) => candidate.score));
+      const nearTopValues = [...new Set(lineCandidates
+        .filter((candidate) => candidate.score >= topScore - 1)
+        .map((candidate) => candidate.value))];
+      if (nearTopValues.length >= 2) return true;
+      if (nearTopValues.length === 1 && selectedAmount && nearTopValues[0] !== selectedAmount) return true;
+      const strongValues = [...new Set(lineCandidates.map((candidate) => candidate.value))];
+      if (strongValues.length >= 3) return true;
+    }
     const visibleValues = [...new Set(extractYenNumbers(source).filter((value) => value > 0 && value < 10000000))];
-    return visibleValues.length >= 6 && strongValues.length !== 1;
+    return visibleValues.length >= 6 && lineCandidates.length !== 1;
   }
 
   function taxSplitNeedsReview(source, fields) {
@@ -4140,6 +4193,15 @@
     const activeResult = getActiveLocalOcrCandidate();
     if (!activeResult) return;
     const fields = activeResult.fields || {};
+    if (localOcrCandidateLooksMerged(activeResult.text || "")) {
+      clearLocalOcrReceiptFormFields(form);
+      setLocalOcrMessage(
+        "この候補は複数レシートが混ざっている可能性が高いため、フォームへ反映しませんでした。候補を切り替えるか、1枚ずつ切り抜いた画像で読み直してください。",
+        "bad"
+      );
+      return;
+    }
+    clearLocalOcrReceiptFormFields(form);
     setFormValue(form, "date", fields.date);
     setFormValue(form, "vendor", fields.vendor);
     setFormValue(form, "category", fields.category);
@@ -4167,6 +4229,41 @@
       "選択した候補をフォームへ反映しました。未記入や確認項目がある場合は、登録前に原本画像で確認してください。",
       (activeResult.missingFields || []).length || (activeResult.warnings || []).length ? "warn" : "good"
     );
+  }
+
+  function clearLocalOcrReceiptFormFields(form) {
+    [
+      "date",
+      "vendor",
+      "category",
+      "department",
+      "paymentMethod",
+      "itemName",
+      "quantity",
+      "unitPrice",
+      "amount",
+      "taxRate",
+      "registrationNumber",
+      "note",
+      "split10Amount",
+      "split8Amount",
+      "splitMemo",
+      "expenseEligibility",
+      "expenseEligibilityReason"
+    ].forEach((name) => {
+      const field = form.elements[name];
+      if (!field) return;
+      if (field.type === "checkbox") {
+        field.checked = false;
+        return;
+      }
+      if (field.tagName === "SELECT") {
+        const blankIndex = [...field.options].findIndex((option) => option.value === "");
+        field.selectedIndex = blankIndex >= 0 ? blankIndex : -1;
+        return;
+      }
+      field.value = "";
+    });
   }
 
   function setFormValue(form, name, value) {
