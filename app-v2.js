@@ -132,6 +132,7 @@
     bindGlobalEvents();
     applyBundledReceiptMigrations();
     applyBundledBankbookMigrations();
+    applyBundledHitechMigrations();
     applyExpenseEligibilityDefaults();
     persist("自動保存");
     render();
@@ -371,6 +372,56 @@
         added: addedCount
       });
     }
+  }
+
+  function applyBundledHitechMigrations() {
+    const migrationId = "hitech-detail-202506-visible-v1";
+    state.settings.appliedMigrations = Array.isArray(state.settings.appliedMigrations) ? state.settings.appliedMigrations : [];
+    if (state.settings.appliedMigrations.includes(migrationId)) return;
+
+    state.hitech = Array.isArray(state.hitech) ? state.hitech : [];
+    const record = bundledHitech202506Detail();
+    const existing = state.hitech.find((item) => item.id === record.id);
+    if (existing) {
+      Object.assign(existing, record, {
+        createdAt: existing.createdAt || record.createdAt,
+        updatedAt: new Date().toISOString()
+      });
+    } else {
+      state.hitech.push(record);
+    }
+    state.settings.appliedMigrations.push(migrationId);
+    addAudit("ハイテク明細読み取り結果反映", {
+      sourceFile: record.sourceFile,
+      added: existing ? 0 : 1,
+      updated: existing ? 1 : 0
+    });
+  }
+
+  function bundledHitech202506Detail() {
+    return {
+      id: "hitech-202506-visible-001",
+      date: "2026-06-01",
+      sourcePeriod: "2025.6～",
+      sender: "ハイテク明細",
+      instructor: "未確認",
+      course: "講師料 448,800円 / 交通費 18,720円 / 総支給額 467,520円",
+      amount: 467520,
+      status: "確認中",
+      sourceFile: "ハイテク明細　2025.6～.zip",
+      sourcePage: "貼付画像",
+      teachingFee: 448800,
+      transportation: 18720,
+      grossPayment: 467520,
+      deductionTotal: 0,
+      netPayment: 467520,
+      cumulativePayment: 1723900,
+      jid: "45,785",
+      confidence: "中",
+      linkedTo: "",
+      note: "画像から読める範囲で登録。対象月・支払日・講師名は画像内で未確認のため、原本ZIPの明細で確認してください。表示用の日付は2026/06/01で仮登録。支給額累計 1,723,900円、JID 45,785。",
+      createdAt: "2026-07-01T00:00:00.000+09:00"
+    };
   }
 
   function bundledBankbook20260625Entries() {
@@ -5592,6 +5643,9 @@
     if (type === "trips") {
       return `<div class="table-wrap"><table><thead><tr><th>日付</th><th>行先</th><th>目的</th><th>移動</th><th class="num">km</th><th class="num">ガソリン</th><th class="num">宿泊</th><th class="num">合計</th><th>操作</th></tr></thead><tbody>${items.map((item) => `<tr><td>${esc(formatDate(item.date))}</td><td>${esc(item.destination)}</td><td>${esc(item.purpose)}</td><td>${esc(item.transport)}</td><td class="num">${esc(item.mileage || "")}</td><td class="num">${yen(item.fuelClaim)}</td><td class="num">${yen(item.lodging)}</td><td class="num">${yen(item.total)}</td><td>${rowActions(type, item.id)}</td></tr>`).join("")}</tbody></table></div>`;
     }
+    if (type === "hitech") {
+      return `<div class="table-wrap"><table><thead><tr><th>日付</th><th>元資料</th><th>講師</th><th>内容</th><th class="num">講師料</th><th class="num">交通費</th><th class="num">差引支給</th><th>状態</th><th>メモ</th><th>操作</th></tr></thead><tbody>${items.map((item) => `<tr><td>${dateOrMissing(item.date)}</td><td>${esc(item.sourceFile || item.sender || "")}</td><td>${displayOrMissing(item.instructor)}</td><td>${displayOrMissing(item.course)}</td><td class="num">${moneyOrMissing(item.teachingFee)}</td><td class="num">${moneyOrMissing(item.transportation)}</td><td class="num"><strong>${moneyOrMissing(item.netPayment !== undefined ? item.netPayment : item.amount)}</strong></td><td>${statusBadge(item.status)}</td><td>${displayOrMissing(item.note)}</td><td>${rowActions(type, item.id)}</td></tr>`).join("")}</tbody></table></div>`;
+    }
     if (type === "payroll") {
       return `<div class="table-wrap"><table><thead><tr><th>対象月</th><th>氏名</th><th class="num">基本給</th><th class="num">手当</th><th class="num">控除</th><th class="num">支給額</th><th>支払日</th><th>操作</th></tr></thead><tbody>${items.map((item) => `<tr><td>${esc(item.payMonth)}</td><td>${esc(item.employee)}</td><td class="num">${yen(item.basePay)}</td><td class="num">${yen(item.allowance)}</td><td class="num">${yen(item.deduction)}</td><td class="num">${yen(item.netPay)}</td><td>${esc(formatDate(item.payDate))}</td><td>${rowActions(type, item.id)}</td></tr>`).join("")}</tbody></table></div>`;
     }
@@ -6483,6 +6537,8 @@
     const invoices = fiscalInvoices();
     const bankbookEntries = state.bankbookEntries || [];
     const bankbookUnmatched = bankbookEntries.filter((item) => !["照合済", "対象外"].includes(item.status)).length;
+    const hitechRows = fiscalItems(state.hitech || [], "date");
+    const hitechPending = hitechRows.filter((item) => item.status !== "完了").length;
     const alerts = getAlerts();
     const health = getDataHealth();
     const categoryRows = summarizeExpenses(expenses);
@@ -6508,6 +6564,7 @@
     <tr><th>売上入金</th><td>${yen(sum(sales, "amount"))} / ${sales.length}件</td></tr>
     <tr><th>請求書</th><td>${yen(sum(invoices, "amount"))} / ${invoices.length}件</td></tr>
     <tr><th>通帳PDF読み取り</th><td>${bankbookEntries.length}件 / 未照合 ${bankbookUnmatched}件</td></tr>
+    <tr><th>ハイテク明細</th><td>${hitechRows.length}件 / 未完了 ${hitechPending}件</td></tr>
     <tr><th>未確認</th><td>${alerts.length}件</td></tr>
   </tbody></table>
   <h2>要確認事項</h2>
@@ -8671,6 +8728,7 @@
   function ledgerCsvFields(type) {
     if (type === "trips") return [["date", "日付"], ["destination", "行先"], ["purpose", "目的"], ["transport", "移動"], ["mileage", "km"], ["fuelClaim", "ガソリン請求"], ["lodging", "宿泊"], ["total", "合計"], ["note", "メモ"]];
     if (type === "payroll") return [["payMonth", "対象月"], ["employee", "氏名"], ["basePay", "基本給"], ["allowance", "手当"], ["deduction", "控除"], ["netPay", "支給額"], ["payDate", "支払日"], ["note", "メモ"]];
+    if (type === "hitech") return [["date", "日付"], ["sourcePeriod", "元資料期間"], ["sender", "送付元"], ["instructor", "講師"], ["course", "内容"], ["teachingFee", "講師料"], ["transportation", "交通費"], ["grossPayment", "総支給額"], ["deductionTotal", "控除合計"], ["netPayment", "差引支給"], ["cumulativePayment", "支給額累計"], ["jid", "JID"], ["amount", "台帳金額"], ["status", "状態"], ["confidence", "情報確度"], ["sourceFile", "元資料"], ["sourcePage", "元ページ"], ["note", "メモ"]];
     return [["date", "日付"], ["sender", "送付元"], ["instructor", "講師"], ["course", "内容"], ["amount", "金額"], ["status", "状態"], ["note", "メモ"]];
   }
 
