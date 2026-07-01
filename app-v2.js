@@ -112,6 +112,7 @@
   let activeView = "dashboard";
   let selectedFiscalYear = getFiscalYear(TODAY);
   let receiptPaymentFilter = "all";
+  let lastLocalOcrResult = null;
   let bookState = {
     tab: "general",
     report: "pl",
@@ -2545,6 +2546,7 @@
           <span class="badge">${esc(state.settings.companyName)}</span>
         </div>
         <div class="panel-body">
+          ${renderLocalOcrPanel()}
           ${expenseForm("receiptForm", "登録", true)}
         </div>
       </section>
@@ -2581,6 +2583,7 @@
     document.getElementById("receiptForm").addEventListener("submit", handleExpenseSubmit);
     document.getElementById("exportReceiptMonthlyCsv").addEventListener("click", () => exportCsv("receipt-monthly-summary", monthlyRows, receiptMonthlySummaryCsvFields()));
     bindExpenseFormHelpers("receiptForm");
+    bindLocalOcrPanel();
     bindReceiptActions();
   }
 
@@ -2774,6 +2777,495 @@
     if (tsuruhaButton) tsuruhaButton.addEventListener("click", () => fillTsuruhaExample(form));
   }
 
+  function renderLocalOcrPanel() {
+    const status = getLocalOcrEngineStatus();
+    return `
+      <div class="local-ocr-panel" data-local-ocr>
+        <div class="local-ocr-head">
+          <div>
+            <h3>ローカルOCR</h3>
+            <p>画像はこのブラウザ内で読み取ります。クラウドOCRや外部AIには送信しません。</p>
+          </div>
+          <div class="actions">
+            <span class="badge good">外部送信なし</span>
+            <span class="badge ${esc(status.badge)}">${esc(status.label)}</span>
+          </div>
+        </div>
+        <div class="local-ocr-grid">
+          <label class="field">
+            <span>読取画像</span>
+            <input id="localOcrFile" type="file" accept="image/*">
+          </label>
+          <label class="field">
+            <span>読み取り文字を貼付</span>
+            <textarea id="localOcrPaste" placeholder="OCR済みテキストを貼る場合はこちら。画像OCRが未対応のブラウザでも、貼り付けた文字から日付・金額・T番号を整理できます。"></textarea>
+          </label>
+        </div>
+        <div class="actions local-ocr-actions">
+          <button class="button secondary" id="localOcrRun" type="button">画像から読取</button>
+          <button class="button secondary" id="localOcrParseText" type="button">貼付文字を解析</button>
+          <button class="button" id="localOcrApply" type="button" ${lastLocalOcrResult ? "" : "disabled"}>フォームへ反映</button>
+        </div>
+        <div id="localOcrMessage" class="local-ocr-message">${esc(status.detail)}</div>
+        <div id="localOcrResult">
+          ${renderLocalOcrResult(lastLocalOcrResult)}
+        </div>
+      </div>
+    `;
+  }
+
+  function bindLocalOcrPanel() {
+    const panel = app.querySelector("[data-local-ocr]");
+    if (!panel) return;
+    const fileInput = panel.querySelector("#localOcrFile");
+    const pasteInput = panel.querySelector("#localOcrPaste");
+    const runButton = panel.querySelector("#localOcrRun");
+    const parseButton = panel.querySelector("#localOcrParseText");
+    const applyButton = panel.querySelector("#localOcrApply");
+
+    if (runButton) {
+      runButton.addEventListener("click", async () => {
+        const file = fileInput && fileInput.files ? fileInput.files[0] : null;
+        if (!file) {
+          setLocalOcrMessage("画像ファイルを選択してください。", "warn");
+          return;
+        }
+        runButton.disabled = true;
+        setLocalOcrMessage("ローカルOCRで読み取り中です。外部送信はしていません。", "info");
+        try {
+          const proof = await readFile(file);
+          const text = await runLocalOcrFromFile(file, (message) => setLocalOcrMessage(message, "info"));
+          lastLocalOcrResult = buildLocalOcrResult(text, {
+            fileName: file.name,
+            proof,
+            sourceKind: "画像OCR"
+          });
+          saveLocalOcrExtract(lastLocalOcrResult);
+          syncLocalOcrResult();
+          setLocalOcrMessage("読み取り結果を作成しました。未記入の項目を確認してからフォームへ反映してください。", lastLocalOcrResult.missingFields.length ? "warn" : "good");
+        } catch (error) {
+          console.error(error);
+          setLocalOcrMessage(error.message || "ローカルOCRを実行できませんでした。", "bad");
+        } finally {
+          runButton.disabled = false;
+        }
+      });
+    }
+
+    if (parseButton) {
+      parseButton.addEventListener("click", () => {
+        const text = pasteInput ? pasteInput.value : "";
+        if (!clean(text)) {
+          setLocalOcrMessage("解析する文字を貼り付けてください。", "warn");
+          return;
+        }
+        lastLocalOcrResult = buildLocalOcrResult(text, {
+          fileName: "貼付テキスト",
+          proof: null,
+          sourceKind: "貼付文字"
+        });
+        saveLocalOcrExtract(lastLocalOcrResult);
+        syncLocalOcrResult();
+        setLocalOcrMessage("貼り付け文字から下書きを作成しました。", lastLocalOcrResult.missingFields.length ? "warn" : "good");
+      });
+    }
+
+    if (applyButton) {
+      applyButton.addEventListener("click", applyLocalOcrResultToReceiptForm);
+    }
+  }
+
+  function getLocalOcrEngineStatus() {
+    if (window.Tesseract && typeof window.Tesseract.recognize === "function") {
+      return { badge: "good", label: "Tesseract同梱", detail: "同梱OCRエンジンを使用できます。" };
+    }
+    if ("TextDetector" in window) {
+      return { badge: "good", label: "ブラウザ内OCR", detail: "ブラウザ内TextDetectorを使用できます。精度は環境に依存します。" };
+    }
+    return {
+      badge: "warn",
+      label: "エンジン確認前",
+      detail: "同梱Tesseract.jsがある場合は画像読取時に読み込みます。見つからない場合、外部送信せず未対応として止まります。"
+    };
+  }
+
+  function setLocalOcrMessage(message, tone = "info") {
+    const element = document.getElementById("localOcrMessage");
+    if (!element) return;
+    element.className = `local-ocr-message ${esc(tone)}`;
+    element.textContent = message;
+  }
+
+  function syncLocalOcrResult() {
+    const result = document.getElementById("localOcrResult");
+    if (result) result.innerHTML = renderLocalOcrResult(lastLocalOcrResult);
+    const applyButton = document.getElementById("localOcrApply");
+    if (applyButton) applyButton.disabled = !lastLocalOcrResult;
+  }
+
+  function renderLocalOcrResult(result) {
+    if (!result) {
+      return `<div class="local-ocr-empty">画像を選んで「画像から読取」を押すと、日付・取引先・金額・税区分・T番号の下書きを作ります。</div>`;
+    }
+    const fields = [
+      ["date", "日付"],
+      ["vendor", "取引先"],
+      ["category", "経費科目"],
+      ["itemName", "品名"],
+      ["amount", "金額"],
+      ["paymentMethod", "支払区分"],
+      ["taxRate", "税区分"],
+      ["registrationNumber", "T番号"]
+    ];
+    return `
+      <div class="local-ocr-result-card">
+        <div class="local-ocr-result-head">
+          <strong>${esc(result.sourceKind)} / ${esc(result.fileName)}</strong>
+          <span class="badge ${result.missingFields.length ? "warn" : "good"}">${result.missingFields.length ? `未記入 ${result.missingFields.length}` : "下書きOK"}</span>
+        </div>
+        <div class="local-ocr-result-grid">
+          ${fields.map(([key, label]) => `
+            <div>
+              <span>${esc(label)}</span>
+              <strong>${localOcrDisplayValue(result.fields[key], key)}</strong>
+            </div>
+          `).join("")}
+        </div>
+        ${result.fields.split10Amount || result.fields.split8Amount ? `
+          <div class="local-ocr-split-note">
+            10%対象 ${result.fields.split10Amount ? yen(result.fields.split10Amount) : missingValueHtml()} /
+            8%対象 ${result.fields.split8Amount ? yen(result.fields.split8Amount) : missingValueHtml()}
+          </div>
+        ` : ""}
+        <details class="local-ocr-text">
+          <summary>読み取り文字を確認</summary>
+          <pre>${esc(result.text)}</pre>
+        </details>
+      </div>
+    `;
+  }
+
+  function localOcrDisplayValue(value, key) {
+    if (!hasDisplayValue(value)) return missingValueHtml();
+    if (key === "amount") return esc(yen(value));
+    if (key === "paymentMethod") return esc(paymentLabel(value));
+    return esc(value);
+  }
+
+  async function runLocalOcrFromFile(file, report) {
+    if (window.Tesseract && typeof window.Tesseract.recognize === "function") {
+      return runTesseractLocalOcr(file, report);
+    }
+    await loadBundledTesseract();
+    if (window.Tesseract && typeof window.Tesseract.recognize === "function") {
+      return runTesseractLocalOcr(file, report);
+    }
+    if ("TextDetector" in window) {
+      return runBrowserTextDetectorOcr(file);
+    }
+    throw new Error("OCRエンジンが同梱されていないか、このブラウザがローカルOCRに未対応です。外部送信はしていません。");
+  }
+
+  function loadBundledTesseract() {
+    if (window.Tesseract) return Promise.resolve();
+    const existing = document.querySelector("script[data-local-ocr-engine]");
+    if (existing) {
+      return new Promise((resolve, reject) => {
+        existing.addEventListener("load", resolve, { once: true });
+        existing.addEventListener("error", () => reject(new Error("同梱OCRエンジンを読み込めませんでした。")), { once: true });
+      }).catch(() => undefined);
+    }
+    return new Promise((resolve) => {
+      const script = document.createElement("script");
+      script.src = "vendor/tesseract/tesseract.min.js";
+      script.defer = true;
+      script.dataset.localOcrEngine = "true";
+      script.onload = () => resolve();
+      script.onerror = () => resolve();
+      document.head.appendChild(script);
+    });
+  }
+
+  async function runTesseractLocalOcr(file, report) {
+    const result = await window.Tesseract.recognize(file, "jpn+eng", {
+      workerPath: "vendor/tesseract/worker.min.js",
+      corePath: "vendor/tesseract/core",
+      langPath: "vendor/tesseract/lang-data",
+      logger(message) {
+        if (!report || !message) return;
+        const progress = typeof message.progress === "number" ? ` ${Math.round(message.progress * 100)}%` : "";
+        report(`${message.status || "OCR"}${progress}`);
+      }
+    });
+    return result && result.data ? result.data.text || "" : "";
+  }
+
+  async function runBrowserTextDetectorOcr(file) {
+    const Detector = window.TextDetector;
+    const detector = new Detector();
+    const bitmap = await createImageBitmap(file);
+    const detections = await detector.detect(bitmap);
+    if (bitmap.close) bitmap.close();
+    return (detections || []).map((item) => item.rawValue || item.rawText || item.text || "").filter(Boolean).join("\n");
+  }
+
+  function buildLocalOcrResult(text, meta = {}) {
+    const fields = parseReceiptOcrText(text);
+    const missingFields = localOcrMissingFields(fields);
+    return {
+      id: uid("ocr"),
+      createdAt: new Date().toISOString(),
+      sourceKind: meta.sourceKind || "ローカルOCR",
+      fileName: meta.fileName || "",
+      proof: meta.proof || null,
+      text: cleanMultiline(text),
+      fields,
+      missingFields,
+      confidence: localOcrConfidence(fields, missingFields)
+    };
+  }
+
+  function parseReceiptOcrText(text) {
+    const source = normalizeOcrText(text);
+    const vendor = extractOcrVendor(source);
+    const amount = extractOcrAmount(source);
+    const category = inferOcrCategory(source, vendor);
+    const itemName = inferOcrItemName(source, category);
+    const split = extractOcrTaxSplit(source);
+    const taxRate = split.amount10 && split.amount8 ? "不明" : extractOcrTaxRate(source);
+    return {
+      date: extractOcrDate(source),
+      vendor,
+      category,
+      itemName,
+      quantity: "1",
+      unitPrice: amount || "",
+      amount,
+      paymentMethod: detectPayment(source) || "",
+      taxRate,
+      registrationNumber: normalizeRegistration(extractOcrRegistrationNumber(source)),
+      split10Amount: split.amount10 || "",
+      split8Amount: split.amount8 || "",
+      splitMemo: split.amount10 || split.amount8 ? "ローカルOCRで税率別対象額を検出" : "",
+      note: localOcrNote(source, split)
+    };
+  }
+
+  function normalizeOcrText(text) {
+    return String(text || "")
+      .replace(/[０-９]/g, (char) => String.fromCharCode(char.charCodeAt(0) - 0xFEE0))
+      .replace(/[Ａ-Ｚａ-ｚ]/g, (char) => String.fromCharCode(char.charCodeAt(0) - 0xFEE0))
+      .replace(/[￥¥]/g, "¥")
+      .replace(/[，]/g, ",")
+      .replace(/[－ー―]/g, "-")
+      .replace(/\r/g, "\n");
+  }
+
+  function cleanMultiline(text) {
+    return normalizeOcrText(text)
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .join("\n")
+      .slice(0, 5000);
+  }
+
+  function extractOcrDate(text) {
+    const normalized = normalizeOcrText(text);
+    const reiwa = normalized.match(/令和\s*(\d{1,2})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日/);
+    if (reiwa) return toDateInputSafe(2018 + Number(reiwa[1]), reiwa[2], reiwa[3]);
+    const western = normalized.match(/(20\d{2}|\d{2})\s*[年\/.\-]\s*(\d{1,2})\s*[月\/.\-]\s*(\d{1,2})/);
+    if (!western) return "";
+    const year = Number(western[1]) < 100 ? 2000 + Number(western[1]) : Number(western[1]);
+    return toDateInputSafe(year, western[2], western[3]);
+  }
+
+  function toDateInputSafe(year, month, day) {
+    const y = Number(year);
+    const m = Number(month);
+    const d = Number(day);
+    if (!y || !m || !d || m > 12 || d > 31) return "";
+    return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+  }
+
+  function extractOcrRegistrationNumber(text) {
+    const match = normalizeOcrText(text).match(/T\s*([0-9]{13})/i);
+    return match ? `T${match[1]}` : "";
+  }
+
+  function extractOcrAmount(text) {
+    const lines = normalizeOcrText(text).split("\n").map((line) => line.trim()).filter(Boolean);
+    const priority = lines.filter((line) => /合計|領収金額|請求金額|支払金額|ご請求|お買上|税込|領収額/.test(line));
+    const prioritized = [...priority].reverse().map(extractLastYenNumber).find((value) => value > 0);
+    if (prioritized) return prioritized;
+    const all = lines.flatMap((line) => extractYenNumbers(line)).filter((value) => value > 0 && value < 10000000);
+    return all.length ? Math.max(...all) : "";
+  }
+
+  function extractYenNumbers(text) {
+    const values = [];
+    const regex = /(?:¥|\b)?\s*([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{2,8})\s*(?:円)?/g;
+    let match = regex.exec(text);
+    while (match) {
+      values.push(num(match[1]));
+      match = regex.exec(text);
+    }
+    return values;
+  }
+
+  function extractLastYenNumber(text) {
+    const values = extractYenNumbers(text);
+    return values.length ? values[values.length - 1] : 0;
+  }
+
+  function extractOcrVendor(text) {
+    const known = ["ツルハ", "ENEOS", "COSMO", "ローソン", "セブン", "オカモト", "タイムズ", "佐川", "マクドナルド", "LACOSTE", "ラッキー", "LUCKY", "DCM", "ホクレン", "出光", "アポロ", "宮の森珈琲"];
+    const knownHit = known.find((name) => text.toUpperCase().includes(name.toUpperCase()));
+    if (knownHit) return knownHit;
+    const lines = text.split("\n").map((line) => line.trim()).filter(Boolean);
+    const line = lines.find((candidate) => (
+      candidate.length >= 3
+      && !/領収|合計|小計|消費税|税率|登録番号|TEL|電話|日付|No\.?|クレジット|カード|現金|お釣|お預/.test(candidate)
+      && !/[0-9]{4}[年\/.\-]/.test(candidate)
+      && !/¥|円/.test(candidate)
+    ));
+    return clean(line);
+  }
+
+  function inferOcrCategory(text, vendor) {
+    const source = `${text} ${vendor || ""}`;
+    if (/ガソリン|軽油|燃料|ENEOS|COSMO|出光|ホクレン|オカモト/.test(source)) return "燃料費";
+    if (/駐車|パーキング|高速|タクシー|交通|電車|バス|佐川|送料/.test(source)) return "旅費交通費";
+    if (/電話|通信|郵便|切手/.test(source)) return "通信費";
+    if (/会議|打合|珈琲|コーヒー|レストラン|食事|弁当|マクドナルド/.test(source)) return "会議費";
+    if (/文具|事務|コピー|消耗|ツルハ|DCM|セブン|ローソン/.test(source)) return "消耗品費";
+    return "未分類";
+  }
+
+  function inferOcrItemName(text, category) {
+    if (/ガソリン|軽油|燃料/.test(text) || category === "燃料費") return "ガソリン・燃料";
+    if (/駐車|パーキング/.test(text)) return "駐車料金";
+    if (/洗車/.test(text)) return "洗車";
+    if (/送料|佐川|郵便/.test(text)) return "送料";
+    if (/飲食|食事|弁当|コーヒー|珈琲|マクドナルド/.test(text)) return "飲食・会議用";
+    if (/消耗|文具|コピー/.test(text)) return "消耗品";
+    return "レシート購入分";
+  }
+
+  function extractOcrTaxRate(text) {
+    const source = normalizeOcrText(text);
+    if (/8\s*%/.test(source) && !/10\s*%/.test(source)) return "8%";
+    if (/10\s*%/.test(source)) return "10%";
+    if (/非課税|不課税|対象外/.test(source)) return "非課税";
+    return "不明";
+  }
+
+  function extractOcrTaxSplit(text) {
+    const source = normalizeOcrText(text);
+    return {
+      amount10: extractTaxAmountForRate(source, 10),
+      amount8: extractTaxAmountForRate(source, 8)
+    };
+  }
+
+  function extractTaxAmountForRate(text, rate) {
+    const regex = new RegExp(`${rate}\\s*%[^\\n]{0,24}?([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{2,8})`, "i");
+    const match = normalizeOcrText(text).match(regex);
+    return match ? num(match[1]) : "";
+  }
+
+  function localOcrNote(text, split) {
+    const notes = ["ローカルOCR下書き。登録前に原本画像と照合してください。"];
+    if (split.amount10 || split.amount8) notes.push(`税率別候補: 10% ${split.amount10 ? yen(split.amount10) : "未記入"} / 8% ${split.amount8 ? yen(split.amount8) : "未記入"}`);
+    if (/カード|JCB|VISA|Master|AMEX|クレジット/.test(text)) notes.push("支払区分候補: カード");
+    return notes.join(" ");
+  }
+
+  function localOcrMissingFields(fields) {
+    const required = [
+      ["date", "日付"],
+      ["vendor", "取引先"],
+      ["amount", "金額"],
+      ["paymentMethod", "支払区分"],
+      ["taxRate", "税区分"]
+    ];
+    return required.filter(([key]) => !hasDisplayValue(fields[key]) || fields[key] === "不明").map(([, label]) => label);
+  }
+
+  function localOcrConfidence(fields, missingFields) {
+    const filled = ["date", "vendor", "amount", "paymentMethod", "taxRate", "registrationNumber"].filter((key) => hasDisplayValue(fields[key]) && fields[key] !== "不明").length;
+    if (!missingFields.length && filled >= 5) return "高";
+    if (filled >= 3) return "中";
+    return "低";
+  }
+
+  function saveLocalOcrExtract(result) {
+    if (!result) return;
+    state.documentExtracts = Array.isArray(state.documentExtracts) ? state.documentExtracts : [];
+    const fields = result.fields || {};
+    state.documentExtracts.push({
+      id: uid("extract"),
+      documentDate: fields.date || TODAY,
+      sourceCategory: "受領書類",
+      sourceFormat: result.proof ? "画像" : "テキスト",
+      sourceFile: result.fileName || "",
+      documentTitle: "ローカルOCRレシート",
+      counterparty: fields.vendor || "",
+      primaryAmount: num(fields.amount),
+      taxAmount: "",
+      grossAmount: num(fields.amount),
+      rowCount: result.text ? result.text.split("\n").length : 0,
+      targetLedger: "経費",
+      linkedRecordId: "",
+      status: result.missingFields.length ? "要確認" : "読取済",
+      confidence: result.confidence,
+      extractedText: result.text || "",
+      numericMemo: [
+        fields.amount ? `金額 ${yen(fields.amount)}` : "",
+        fields.split10Amount ? `10% ${yen(fields.split10Amount)}` : "",
+        fields.split8Amount ? `8% ${yen(fields.split8Amount)}` : ""
+      ].filter(Boolean).join(" / "),
+      issueMemo: result.missingFields.length ? `未記入: ${result.missingFields.join("、")}` : "",
+      createdAt: result.createdAt,
+      updatedAt: result.createdAt
+    });
+    if (state.documentExtracts.length > 600) state.documentExtracts = state.documentExtracts.slice(-600);
+    addAudit("ローカルOCR読取", { file: result.fileName, amount: fields.amount || "", missing: result.missingFields.join("、") });
+    persist("ローカルOCR保存");
+  }
+
+  function applyLocalOcrResultToReceiptForm() {
+    const form = document.getElementById("receiptForm");
+    if (!form || !lastLocalOcrResult) return;
+    const fields = lastLocalOcrResult.fields || {};
+    setFormValue(form, "date", fields.date);
+    setFormValue(form, "vendor", fields.vendor);
+    setFormValue(form, "category", fields.category);
+    setFormValue(form, "department", departments()[0]);
+    setFormValue(form, "paymentMethod", fields.paymentMethod);
+    setFormValue(form, "itemName", fields.itemName);
+    setFormValue(form, "quantity", fields.quantity || "1");
+    setFormValue(form, "unitPrice", fields.unitPrice);
+    setFormValue(form, "amount", fields.amount);
+    setFormValue(form, "taxRate", fields.taxRate);
+    setFormValue(form, "registrationNumber", fields.registrationNumber);
+    setFormValue(form, "split10Amount", fields.split10Amount);
+    setFormValue(form, "split8Amount", fields.split8Amount);
+    setFormValue(form, "splitMemo", fields.splitMemo);
+    if (form.elements.invoiceEligible) form.elements.invoiceEligible.checked = Boolean(fields.registrationNumber);
+    if (form.elements.expenseEligibility) form.elements.expenseEligibility.value = "auto";
+    if (form.elements.note) {
+      form.elements.note.value = [fields.note, lastLocalOcrResult.text ? `読み取り文字:\n${lastLocalOcrResult.text}` : ""].filter(Boolean).join("\n\n");
+    }
+    if (lastLocalOcrResult.proof) form.dataset.ocrProofId = lastLocalOcrResult.id;
+    setLocalOcrMessage("フォームへ反映しました。未記入がある場合は赤表示の項目を手入力してください。", lastLocalOcrResult.missingFields.length ? "warn" : "good");
+  }
+
+  function setFormValue(form, name, value) {
+    if (!form.elements[name] || !hasDisplayValue(value)) return;
+    form.elements[name].value = value;
+  }
+
   function fillTsuruhaExample(form) {
     form.elements.date.value = "2026-03-01";
     form.elements.vendor.value = "ツルハドラッグ 福井店";
@@ -2845,7 +3337,10 @@
     const unitPrice = num(data.get("unitPrice"));
     const amount = num(data.get("amount")) || Math.round(quantity * unitPrice);
     const proofFile = data.get("proof");
-    const proof = proofFile && proofFile.size ? await readFile(proofFile) : null;
+    let proof = proofFile && proofFile.size ? await readFile(proofFile) : null;
+    if (!proof && form.dataset.ocrProofId && lastLocalOcrResult && form.dataset.ocrProofId === lastLocalOcrResult.id) {
+      proof = lastLocalOcrResult.proof || null;
+    }
     const paymentMethod = detectPayment(`${data.get("note") || ""} ${proofFile && proofFile.name ? proofFile.name : ""}`) || clean(data.get("paymentMethod")) || "cash";
     const hasSplitAmounts = num(data.get("split10Amount")) > 0 || num(data.get("split8Amount")) > 0;
     const splitMode = (event.submitter && event.submitter.dataset.submitMode === "tax-split") || hasSplitAmounts;
