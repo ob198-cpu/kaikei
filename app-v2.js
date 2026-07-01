@@ -131,6 +131,7 @@
     seedFiscalOptions();
     bindGlobalEvents();
     applyBundledReceiptMigrations();
+    applyBundledBankbookMigrations();
     applyExpenseEligibilityDefaults();
     persist("自動保存");
     render();
@@ -175,6 +176,7 @@
       receivedDocs: [],
       paymentRequests: [],
       importBatches: [],
+      bankbookEntries: [],
       sales: [],
       invoices: [],
       estimates: [],
@@ -225,6 +227,7 @@
       "receivedDocs",
       "paymentRequests",
       "importBatches",
+      "bankbookEntries",
       "sales",
       "invoices",
       "estimates",
@@ -340,6 +343,162 @@
         updated: updatedCount
       });
     }
+  }
+
+  function applyBundledBankbookMigrations() {
+    const migrationId = "bankbook-20260625-pdf-partial-v1";
+    state.settings.appliedMigrations = Array.isArray(state.settings.appliedMigrations) ? state.settings.appliedMigrations : [];
+    if (state.settings.appliedMigrations.includes(migrationId)) return;
+
+    state.bankbookEntries = Array.isArray(state.bankbookEntries) ? state.bankbookEntries : [];
+    let addedCount = 0;
+    bundledBankbook20260625Entries().forEach((record) => {
+      const existing = state.bankbookEntries.find((item) => item.id === record.id);
+      if (existing) {
+        Object.assign(existing, record, {
+          createdAt: existing.createdAt || record.createdAt,
+          updatedAt: new Date().toISOString()
+        });
+        return;
+      }
+      state.bankbookEntries.push(record);
+      addedCount += 1;
+    });
+    state.settings.appliedMigrations.push(migrationId);
+    if (addedCount) {
+      addAudit("通帳PDF読み取り結果反映", {
+        sourceFile: "2026-6-25_(2).pdf",
+        added: addedCount
+      });
+    }
+  }
+
+  function bundledBankbook20260625Entries() {
+    const createdAt = "2026-07-01T00:00:00.000+09:00";
+    const sourceFile = "2026-6-25_(2).pdf";
+    const sourcePage = "貼付画像";
+    const baseNote = "通帳PDF画像から読める範囲で登録。摘要・名義は原本PDFで再確認してください。";
+    return [
+      {
+        id: "bankbook-20260625-20260427-aig",
+        date: "2026-04-27",
+        statementDateText: "08-04-27",
+        sourceFile,
+        sourcePage,
+        direction: "出金",
+        summary: "AIGソンポ",
+        amount: 18370,
+        balance: 8314981,
+        classification: "保険料候補",
+        status: "未照合",
+        linkedTo: "",
+        confidence: "中",
+        note: baseNote,
+        createdAt
+      },
+      {
+        id: "bankbook-20260625-20260427-okazaki",
+        date: "2026-04-27",
+        statementDateText: "08-04-27",
+        sourceFile,
+        sourcePage,
+        direction: "入金",
+        summary: "オカザキ キサト（読取不確実）",
+        amount: 455818,
+        balance: 8770799,
+        classification: "売上入金候補",
+        status: "未照合",
+        linkedTo: "",
+        confidence: "低",
+        note: `${baseNote} 請求書番号・売上先との紐づけが必要。`,
+        createdAt
+      },
+      {
+        id: "bankbook-20260625-20260428-zhsakura",
+        date: "2026-04-28",
+        statementDateText: "08-04-28",
+        sourceFile,
+        sourcePage,
+        direction: "出金",
+        summary: "ZHサクラナビ / イトウショウ（読取不確実）",
+        amount: 33482,
+        balance: 8737317,
+        classification: "支払候補",
+        status: "未照合",
+        linkedTo: "",
+        confidence: "低",
+        note: baseNote,
+        createdAt
+      },
+      {
+        id: "bankbook-20260625-20260428-transfer",
+        date: "2026-04-28",
+        statementDateText: "08-04-28",
+        sourceFile,
+        sourcePage,
+        direction: "入金",
+        summary: "振込名義未確認",
+        amount: 16000,
+        balance: 8753317,
+        classification: "売上入金候補",
+        status: "未照合",
+        linkedTo: "",
+        confidence: "低",
+        note: `${baseNote} 振込名義が画像では判読しづらいため原本確認。`,
+        createdAt
+      },
+      {
+        id: "bankbook-20260625-20260430-social-insurance",
+        date: "2026-04-30",
+        statementDateText: "08-04-30",
+        sourceFile,
+        sourcePage,
+        direction: "出金",
+        summary: "社会保険料",
+        amount: 283008,
+        balance: 8470309,
+        classification: "社会保険料",
+        status: "未照合",
+        linkedTo: "",
+        confidence: "高",
+        note: "給与・社会保険関係資料と照合してください。",
+        createdAt
+      },
+      {
+        id: "bankbook-20260625-20260430-yamagishi",
+        date: "2026-04-30",
+        statementDateText: "08-04-30",
+        sourceFile,
+        sourcePage,
+        direction: "入金",
+        summary: "カ)ヤマギシコピ-センタ（読取不確実）",
+        amount: 616000,
+        balance: 9086309,
+        classification: "売上入金候補",
+        status: "未照合",
+        linkedTo: "",
+        confidence: "低",
+        note: `${baseNote} 請求書・売上請求書フォルダと照合してください。`,
+        createdAt
+      },
+      {
+        id: "bankbook-20260625-20260430-public",
+        date: "2026-04-30",
+        statementDateText: "08-04-30",
+        sourceFile,
+        sourcePage,
+        direction: "入金",
+        summary: "公金 / 名義未確認",
+        amount: 154341,
+        balance: 9240650,
+        classification: "公金・還付/補助金候補",
+        status: "未照合",
+        linkedTo: "",
+        confidence: "低",
+        note: `${baseNote} 売上ではない可能性があるため入金内容確認。`,
+        createdAt
+      }
+    ];
   }
 
   function bundledReceipt157347Expenses() {
@@ -3769,6 +3928,8 @@
     const cardBatches = batches.filter((item) => item.sourceType === "card");
     const createdCount = sum(batches, "createdCount");
     const latest = batches[0];
+    const bankbookEntries = (state.bankbookEntries || []).slice().sort(byDate("date"));
+    const bankbookUnmatched = bankbookEntries.filter((item) => !["照合済", "対象外"].includes(item.status)).length;
 
     app.innerHTML = `
       <section class="panel">
@@ -3785,6 +3946,7 @@
             ${summaryCard("通帳CSV", `${sum(bankBatches, "createdCount")}件`, `${bankBatches.length}回 / 売上一覧へ登録`)}
             ${summaryCard("カードCSV", `${sum(cardBatches, "createdCount")}件`, `${cardBatches.length}回 / カード経費へ登録`)}
             ${summaryCard("取込金額", yen(sum(batches, "amountTotal")), `登録 ${createdCount}件`)}
+            ${summaryCard("通帳PDF", `${bankbookEntries.length}件`, `未照合 ${bankbookUnmatched}件`)}
           </div>
           <div class="notice info" style="margin-top:12px;">
             通帳CSVは売上一覧へ、カードCSVはカード支払の経費として登録します。取込履歴は税理士提出パックにも含めます。
@@ -3802,11 +3964,27 @@
           ${renderImportBatchTable(batches)}
         </div>
       </section>
+      <section class="panel" style="margin-top:14px;">
+        <div class="panel-head">
+          <h2>通帳PDF読み取り結果</h2>
+          <div class="actions">
+            <span class="badge">${bankbookEntries.length}件</span>
+            <button class="button secondary small" id="exportBankbookCsv" type="button">通帳PDF CSV</button>
+          </div>
+        </div>
+        <div class="panel-body">
+          <div class="notice info" style="margin-bottom:12px;">
+            2026-6-25_(2).pdf の貼付画像から読める範囲を未照合で保存しています。読取確度が低い行は、原本PDF・請求書・支払資料で確認してください。
+          </div>
+          ${renderBankbookEntryTable(bankbookEntries)}
+        </div>
+      </section>
     `;
 
     document.getElementById("dataLinkSalesImport").addEventListener("change", importSalesCsv);
     document.getElementById("dataLinkCardImport").addEventListener("change", importCardCsv);
     document.getElementById("exportImportBatchCsv").addEventListener("click", () => exportCsv("import-history", batches, importBatchCsvFields()));
+    document.getElementById("exportBankbookCsv").addEventListener("click", () => exportCsv("bankbook-pdf", bankbookEntries, bankbookCsvFields()));
     app.querySelectorAll("[data-view-jump]").forEach((button) => {
       button.addEventListener("click", () => switchView(button.dataset.viewJump));
     });
@@ -5184,6 +5362,56 @@
     `;
   }
 
+  function renderBankbookEntryTable(items) {
+    if (!items.length) return `<div class="empty">通帳PDFの読み取り結果はまだありません。</div>`;
+    return `
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>日付</th>
+              <th>通帳表記日</th>
+              <th>入出金</th>
+              <th>摘要/名義</th>
+              <th class="num">金額</th>
+              <th class="num">差引残高</th>
+              <th>分類候補</th>
+              <th>照合状態</th>
+              <th>読取確度</th>
+              <th>元資料</th>
+              <th>メモ</th>
+            </tr>
+          </thead>
+          <tbody>${items.map((item) => `<tr>
+            <td>${esc(formatDate(item.date))}</td>
+            <td>${esc(item.statementDateText || "")}</td>
+            <td>${bankbookDirectionBadge(item.direction)}</td>
+            <td>${esc(item.summary || "")}</td>
+            <td class="num">${yen(item.amount)}</td>
+            <td class="num">${yen(item.balance)}</td>
+            <td>${esc(item.classification || "")}</td>
+            <td>${statusBadge(item.status || "未照合")}</td>
+            <td>${bankbookConfidenceBadge(item.confidence)}</td>
+            <td>${esc(item.sourceFile || "")}${item.sourcePage ? `<br><span class="muted">${esc(item.sourcePage)}</span>` : ""}</td>
+            <td>${esc(item.note || "")}</td>
+          </tr>`).join("")}</tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  function bankbookDirectionBadge(direction) {
+    if (direction === "入金") return '<span class="badge good">入金</span>';
+    if (direction === "出金") return '<span class="badge warn">出金</span>';
+    return `<span class="badge">${esc(direction || "未確認")}</span>`;
+  }
+
+  function bankbookConfidenceBadge(confidence) {
+    if (confidence === "高") return '<span class="badge good">高</span>';
+    if (confidence === "中") return '<span class="badge warn">中</span>';
+    return '<span class="badge bad">低 / 原本確認</span>';
+  }
+
   function importSourceBadge(sourceType) {
     if (sourceType === "bank") return '<span class="badge bank">通帳</span>';
     if (sourceType === "card") return '<span class="badge card">カード</span>';
@@ -6223,6 +6451,7 @@
       receivedDocs: fiscalItems(state.receivedDocs || [], "receivedDate"),
       paymentRequests: fiscalItems(state.paymentRequests || [], "requestDate"),
       importBatches: fiscalItems(state.importBatches || [], "importDate"),
+      bankbookEntries: state.bankbookEntries || [],
       sales: fiscalItems(state.sales, "date"),
       invoices: fiscalInvoices(),
       estimates: fiscalItems(state.estimates, "date"),
@@ -6252,6 +6481,8 @@
     const expenses = fiscalItems(state.expenses, "date");
     const sales = fiscalItems(state.sales, "date");
     const invoices = fiscalInvoices();
+    const bankbookEntries = state.bankbookEntries || [];
+    const bankbookUnmatched = bankbookEntries.filter((item) => !["照合済", "対象外"].includes(item.status)).length;
     const alerts = getAlerts();
     const health = getDataHealth();
     const categoryRows = summarizeExpenses(expenses);
@@ -6276,6 +6507,7 @@
     <tr><th>経費合計</th><td>${yen(sum(expenses, "amount"))} / ${expenses.length}件</td></tr>
     <tr><th>売上入金</th><td>${yen(sum(sales, "amount"))} / ${sales.length}件</td></tr>
     <tr><th>請求書</th><td>${yen(sum(invoices, "amount"))} / ${invoices.length}件</td></tr>
+    <tr><th>通帳PDF読み取り</th><td>${bankbookEntries.length}件 / 未照合 ${bankbookUnmatched}件</td></tr>
     <tr><th>未確認</th><td>${alerts.length}件</td></tr>
   </tbody></table>
   <h2>要確認事項</h2>
@@ -7659,6 +7891,24 @@
     exportCsv("books-compare", comparisonRows(entries, bookState.report), [
       ["label", "区分"], ["previous", "前期"], ["previousPercent", "前期構成比"], ["current", "当期"], ["currentPercent", "当期構成比"], ["diff", "増減額"], ["rate", "増減率"]
     ]);
+  }
+
+  function bankbookCsvFields() {
+    return [
+      ["date", "日付"],
+      ["statementDateText", "通帳表記日"],
+      ["direction", "入出金"],
+      ["summary", "摘要/名義"],
+      ["amount", "金額"],
+      ["balance", "差引残高"],
+      ["classification", "分類候補"],
+      ["status", "照合状態"],
+      ["confidence", "読取確度"],
+      ["sourceFile", "元資料"],
+      ["sourcePage", "元ページ"],
+      ["linkedTo", "紐づけ先"],
+      ["note", "メモ"]
+    ];
   }
 
   function importBatchCsvFields() {
