@@ -2945,7 +2945,15 @@
         </details>
       `;
     }
-    return renderLocalOcrCandidateCard(candidates[0], { index: 0, active: true, showApply: false });
+    return `
+      ${result.needsCandidateReview ? `
+        <div class="local-ocr-candidate-summary warn">
+          <strong>台紙に複数レシートの可能性</strong>
+          <span>自動分割できなかったため、日付・金額・取引先は原本画像で確認してください。必要なら1枚ずつ切り抜いて再読取してください。</span>
+        </div>
+      ` : ""}
+      ${renderLocalOcrCandidateCard(candidates[0], { index: 0, active: true, showApply: false })}
+    `;
   }
 
   function renderLocalOcrCandidateCard(result, options = {}) {
@@ -3049,10 +3057,14 @@
   }
 
   async function runTesseractLocalOcr(file, report) {
-    const result = await window.Tesseract.recognize(file, "jpn+eng", {
+    const prepared = await prepareLocalOcrImage(file, report);
+    const result = await window.Tesseract.recognize(prepared.image || file, "jpn+eng", {
       workerPath: "vendor/tesseract/worker.min.js",
       corePath: "vendor/tesseract/core",
       langPath: "vendor/tesseract/lang-data",
+      preserve_interword_spaces: "1",
+      user_defined_dpi: "300",
+      tessedit_pageseg_mode: "11",
       logger(message) {
         if (!report || !message) return;
         const progress = typeof message.progress === "number" ? ` ${Math.round(message.progress * 100)}%` : "";
@@ -3064,6 +3076,59 @@
       text: data.text || "",
       lines: extractTesseractLines(data)
     };
+  }
+
+  async function prepareLocalOcrImage(file, report) {
+    if (!file || !String(file.type || "").startsWith("image/") || typeof createImageBitmap !== "function") {
+      return { image: file, scale: 1 };
+    }
+    try {
+      if (report) report("画像を補正中");
+      const bitmap = await createImageBitmap(file);
+      const maxSide = 3000;
+      const longest = Math.max(bitmap.width, bitmap.height) || 1;
+      const scale = Math.min(2, Math.max(1, maxSide / longest));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+      canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+      const context = canvas.getContext("2d", { willReadFrequently: true });
+      context.fillStyle = "#fff";
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      if (bitmap.close) bitmap.close();
+      enhanceLocalOcrCanvas(canvas);
+      return { image: canvas, scale };
+    } catch (error) {
+      console.warn("local OCR image preparation failed", error);
+      return { image: file, scale: 1 };
+    }
+  }
+
+  function enhanceLocalOcrCanvas(canvas) {
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) return;
+    const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+    const data = imageData.data;
+    let min = 255;
+    let max = 0;
+    for (let index = 0; index < data.length; index += 4) {
+      const gray = Math.round((data[index] * 0.299) + (data[index + 1] * 0.587) + (data[index + 2] * 0.114));
+      min = Math.min(min, gray);
+      max = Math.max(max, gray);
+    }
+    const spread = Math.max(32, max - min);
+    for (let index = 0; index < data.length; index += 4) {
+      const gray = Math.round((data[index] * 0.299) + (data[index + 1] * 0.587) + (data[index + 2] * 0.114));
+      let adjusted = Math.round(((gray - min) / spread) * 255);
+      adjusted = Math.max(0, Math.min(255, Math.round(((adjusted - 128) * 1.18) + 128)));
+      if (adjusted > 242) adjusted = 255;
+      if (adjusted < 34) adjusted = 0;
+      data[index] = adjusted;
+      data[index + 1] = adjusted;
+      data[index + 2] = adjusted;
+      data[index + 3] = 255;
+    }
+    context.putImageData(imageData, 0, 0);
   }
 
   async function runBrowserTextDetectorOcr(file) {
@@ -3131,7 +3196,7 @@
 
   function buildLocalOcrCandidate(text, meta = {}, index = 0, label = "") {
     const cleanedText = cleanMultiline(text);
-    const fields = parseReceiptOcrText(cleanedText);
+    const fields = sanitizeLocalOcrFields(parseReceiptOcrText(cleanedText), cleanedText);
     const missingFields = localOcrMissingFields(fields);
     const warnings = localOcrWarnings(fields, cleanedText, {
       candidateIndex: index,
@@ -3260,7 +3325,7 @@
     const blocks = [];
     let current = [];
     lines.forEach((line) => {
-      if (isLocalOcrReceiptStartLine(line) && current.length >= 4 && localOcrReceiptEvidenceScore(current.join("\n")) >= 2) {
+      if (isLocalOcrReceiptStartLine(line) && current.length >= 2 && localOcrReceiptEvidenceScore(current.join("\n")) >= 2) {
         blocks.push(current);
         current = [];
       }
@@ -3375,12 +3440,41 @@
 
   function extractOcrDate(text) {
     const normalized = normalizeOcrText(text);
-    const reiwa = normalized.match(/令和\s*(\d{1,2})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日/);
-    if (reiwa) return toDateInputSafe(2018 + Number(reiwa[1]), reiwa[2], reiwa[3]);
-    const western = normalized.match(/(20\d{2}|\d{2})\s*[年\/.\-]\s*(\d{1,2})\s*[月\/.\-]\s*(\d{1,2})/);
-    if (!western) return "";
-    const year = Number(western[1]) < 100 ? 2000 + Number(western[1]) : Number(western[1]);
-    return toDateInputSafe(year, western[2], western[3]);
+    const candidates = collectOcrDateCandidates(normalized);
+    const best = candidates[0];
+    return best && best.score >= 3 ? best.value : "";
+  }
+
+  function collectOcrDateCandidates(text) {
+    const source = normalizeOcrText(text);
+    const candidates = [];
+    source.split("\n").forEach((line, lineIndex) => {
+      const reiwaRegex = /令和\s*(\d{1,2})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日/g;
+      let reiwa = reiwaRegex.exec(line);
+      while (reiwa) {
+        const value = toDateInputSafe(2018 + Number(reiwa[1]), reiwa[2], reiwa[3]);
+        if (value) candidates.push({ value, line, lineIndex, score: 6 });
+        reiwa = reiwaRegex.exec(line);
+      }
+      const westernRegex = /(^|[^0-9])((?:20[0-9]{2})|(?:[0-9]{2}))\s*[年\/.\-]\s*([0-9]{1,2})\s*[月\/.\-]\s*([0-9]{1,2})(?:\s*日)?/g;
+      let western = westernRegex.exec(line);
+      while (western) {
+        const rawYear = western[2];
+        const year = Number(rawYear) < 100 ? 2000 + Number(rawYear) : Number(rawYear);
+        const value = toDateInputSafe(year, western[3], western[4]);
+        if (value) {
+          let score = 2;
+          if (year >= 2024 && year <= new Date().getFullYear() + 1) score += 2;
+          if (Number(rawYear) < 100 && Number(rawYear) >= 24 && Number(rawYear) <= 30) score += 1;
+          if (/領収|発行|利用|日付|売上|精算|入庫|出庫|取引|請求|納品/.test(line)) score += 1;
+          if (/期限|有効|承認|会員|登録|TEL|電話|番号|No\.?/i.test(line)) score -= 2;
+          if (/207[0-9]|202[89]/.test(rawYear)) score -= 4;
+          candidates.push({ value, line, lineIndex, score });
+        }
+        western = westernRegex.exec(line);
+      }
+    });
+    return candidates.sort((a, b) => (b.score - a.score) || (a.lineIndex - b.lineIndex));
   }
 
   function toDateInputSafe(year, month, day) {
@@ -3395,28 +3489,37 @@
   }
 
   function extractOcrRegistrationNumber(text) {
-    const match = normalizeOcrText(text).match(/T\s*([0-9]{13})/i);
-    return match ? `T${match[1]}` : "";
+    const match = normalizeOcrText(text).match(/T\s*[:：-]?\s*((?:[0-9][\s-]?){13})/i);
+    return match ? `T${String(match[1]).replace(/[^0-9]/g, "").slice(0, 13)}` : "";
   }
 
   function extractOcrAmount(text) {
     const bestCandidate = collectOcrMoneyCandidates(text)[0];
-    if (bestCandidate && bestCandidate.score >= 4) return bestCandidate.value;
+    if (bestCandidate && bestCandidate.score >= 5) return bestCandidate.value;
     const lines = normalizeOcrText(text).split("\n").map((line) => line.trim()).filter(Boolean);
-    const priority = lines.filter((line) => /合計|領収金額|請求金額|支払金額|ご請求|お買上|税込|領収額/.test(line));
-    const prioritized = [...priority].reverse().map(extractLastYenNumber).find((value) => value > 0);
-    if (prioritized) return prioritized;
-    const all = lines.flatMap((line) => extractYenNumbers(line)).filter((value) => value > 0 && value < 10000000);
-    return all.length ? Math.max(...all) : "";
+    const priority = [...lines].reverse()
+      .filter((line) => /合計|領収金額|請求金額|支払金額|ご請求|お買上|税込|領収額|金額/.test(line))
+      .map((line) => {
+        const value = extractLastYenNumber(line);
+        return { value, score: localOcrAmountLineScore(line, value), line };
+      })
+      .find((candidate) => candidate.value > 0 && candidate.score >= 5);
+    return priority ? priority.value : "";
   }
 
-  function extractYenNumbers(text) {
+  function extractYenNumbers(text, options = {}) {
+    const source = normalizeOcrText(text);
     const values = [];
-    const regex = /(?:¥|\b)?\s*([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{2,8})\s*(?:円)?/g;
-    let match = regex.exec(text);
+    const hasContext = localOcrLineHasMoneyContext(source);
+    const regex = /(¥\s*)?([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{2,8})\s*(円)?/g;
+    let match = regex.exec(source);
     while (match) {
-      values.push(num(match[1]));
-      match = regex.exec(text);
+      const hasCurrency = Boolean(match[1] || match[3]);
+      const token = match[2];
+      if ((hasCurrency || hasContext || options.loose) && !localOcrNumericTokenLooksNonMoney(source, match.index, token, hasCurrency)) {
+        values.push(num(token));
+      }
+      match = regex.exec(source);
     }
     return values;
   }
@@ -3424,6 +3527,24 @@
   function extractLastYenNumber(text) {
     const values = extractYenNumbers(text);
     return values.length ? values[values.length - 1] : 0;
+  }
+
+  function localOcrLineHasMoneyContext(line) {
+    return /¥|円|合計|小計|計|金額|領収|請求|支払|支払額|支払金額|お買上|お買い上げ|税込|税抜|対象額|クレジット|カード|現金|売上|料金|代金/.test(String(line || ""));
+  }
+
+  function localOcrNumericTokenLooksNonMoney(line, index, token, hasCurrency) {
+    const source = String(line || "");
+    const value = num(token);
+    const before = source.slice(Math.max(0, index - 14), index);
+    const after = source.slice(index + String(token).length, index + String(token).length + 14);
+    if (!value) return true;
+    if (!hasCurrency && value < 100) return true;
+    if (String(token).replace(/,/g, "").length >= 9) return true;
+    if (/^[\s]*(年|月|日|時|分|秒|:|\/|-|%|％|点|個|枚|件|L|l|リットル|km)/.test(after)) return true;
+    if (/(TEL|電話|登録|T$|T\s*$|No\.?|伝票|承認|会員|端末|車番|駐車|時間|発行|レジ|店番|取引|番号|コード|バーコード)$/i.test(before)) return true;
+    if (!hasCurrency && /税率|消費税|内税|外税|税額|お釣|おつり|釣銭|お預|預り|ポイント|割引|値引|クーポン|承認|会員|端末|個|点|枚|L\/|km|リットル/i.test(source) && !/合計|領収金額|請求金額|支払金額|カード計|クレジット計|現金計/.test(source)) return true;
+    return false;
   }
 
   function extractOcrVendor(text) {
@@ -3489,6 +3610,72 @@
     return notes.join(" ");
   }
 
+  function sanitizeLocalOcrFields(fields, text) {
+    const source = normalizeOcrText(text);
+    const next = { ...(fields || {}) };
+    const moneyCandidates = collectOcrMoneyCandidates(source);
+    const paymentSignals = detectOcrPaymentSignals(source);
+    if (next.date && localOcrDateNeedsManualEntry(next.date, source)) next.date = "";
+    if (next.amount && !localOcrAmountIsReliable(source, next.amount, moneyCandidates)) {
+      next.amount = "";
+      next.unitPrice = "";
+    }
+    if (next.registrationNumber && !isValidRegistration(next.registrationNumber)) next.registrationNumber = "";
+    if (paymentSignals.length !== 1) next.paymentMethod = "";
+    if (next.taxRate === "不明" && !next.split10Amount && !next.split8Amount) next.taxRate = "";
+    if (/10\s*%/.test(source) && /8\s*%/.test(source) && (!next.split10Amount || !next.split8Amount)) next.taxRate = "不明";
+    if (next.vendor && ocrVendorNeedsReview(next.vendor)) next.vendor = "";
+    if (next.amount && next.unitPrice !== next.amount) next.unitPrice = next.amount;
+    return next;
+  }
+
+  function localOcrDateNeedsManualEntry(dateValue, source) {
+    if (!dateValue) return true;
+    const year = Number(String(dateValue).slice(0, 4));
+    const currentYear = new Date().getFullYear();
+    if (!year || year < 2024 || year > currentYear + 1) return true;
+    if (/(207[0-9]|202[89])/.test(source) && !localOcrSourceClearlySupportsDate(dateValue, source)) return true;
+    const dateCandidates = collectOcrDateCandidates(source).filter((candidate) => candidate.value === dateValue);
+    return !dateCandidates.some((candidate) => candidate.score >= 3);
+  }
+
+  function localOcrSourceClearlySupportsDate(dateValue, source) {
+    const [year, month, day] = String(dateValue || "").split("-");
+    if (!year || !month || !day) return false;
+    const m = String(Number(month));
+    const d = String(Number(day));
+    const mm = String(month).padStart(2, "0");
+    const dd = String(day).padStart(2, "0");
+    const yy = String(year).slice(2);
+    const patterns = [
+      `${year}年${m}月${d}日`,
+      `${year}年${mm}月${dd}日`,
+      `${year}/${m}/${d}`,
+      `${year}/${mm}/${dd}`,
+      `${year}-${m}-${d}`,
+      `${year}-${mm}-${dd}`,
+      `${yy}年${m}月${d}日`,
+      `${yy}年${mm}月${dd}日`,
+      `${yy}/${m}/${d}`,
+      `${yy}/${mm}/${dd}`,
+      `${yy}-${m}-${d}`,
+      `${yy}-${mm}-${dd}`
+    ];
+    const compact = normalizeOcrText(source).replace(/\s/g, "");
+    return patterns.some((pattern) => compact.includes(pattern.replace(/\s/g, "")));
+  }
+
+  function localOcrAmountIsReliable(source, amount, moneyCandidates) {
+    const value = num(amount);
+    if (!value) return false;
+    const candidates = moneyCandidates || collectOcrMoneyCandidates(source);
+    const strong = candidates.filter((candidate) => candidate.score >= 5);
+    if (strong.some((candidate) => candidate.value === value)) return true;
+    const split = extractOcrTaxSplit(source);
+    if ((num(split.amount10) || num(split.amount8)) && num(split.amount10) + num(split.amount8) === value) return true;
+    return false;
+  }
+
   function localOcrMissingFields(fields) {
     const required = [
       ["date", "日付"],
@@ -3551,7 +3738,7 @@
       .split("\n")
       .map((line) => line.trim())
       .filter(Boolean)
-      .flatMap((line, index) => extractYenNumbers(line)
+      .flatMap((line, index) => extractYenNumbers(line, { loose: localOcrLineHasMoneyContext(line) })
         .filter((value) => value > 0 && value < 10000000)
         .map((value) => ({ value, line, index, score: localOcrAmountLineScore(line, value) })))
       .filter((candidate) => candidate.score > -4)
@@ -3560,7 +3747,7 @@
 
   function localOcrAmountLineScore(line, value) {
     let score = 0;
-    if (/合計金額|合計|領収金額|領収額|請求金額|支払金額|カード計|クレジット計|現金計|お買上|お買い上げ|税込合計|売上合計/.test(line)) score += 5;
+    if (/合計金額|合計|領収金額|領収額|請求金額|支払金額|カード計|クレジット計|現金計|お買上|お買い上げ|税込合計|売上合計|支払額|金額/.test(line)) score += 5;
     if (/クレジット|カード|現金|cash|visa|master|jcb|amex/i.test(line)) score += 2;
     if (/小計|税抜|対象額/.test(line)) score -= 1;
     if (/消費税|内税|外税|税額|お釣|おつり|釣銭|お預|預り|ポイント|割引|値引|クーポン|TEL|電話|登録番号|T\d{10,}|No\.?|伝票|時刻|時間|駐車時間|承認|会員|端末|バーコード|個|点|枚|L\/|km|リットル/i.test(line)) score -= 4;
@@ -3572,7 +3759,7 @@
     const year = Number(String(dateValue || "").slice(0, 4));
     const currentYear = new Date().getFullYear();
     if (!year || year < 2024 || year > currentYear + 1) return true;
-    return /(207\d|202[789])/.test(source);
+    return /(207\d|202[789])/.test(source) && !localOcrSourceClearlySupportsDate(dateValue, source);
   }
 
   function ocrAmountLooksAmbiguous(source, selectedAmount, moneyCandidates) {
