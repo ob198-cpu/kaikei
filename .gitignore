@@ -1,25 +1,7 @@
-# Private Google/Apps Script configuration
-.clasp.json
-google-apps-script/
-
-# Accounting evidence and exports must never enter the public repository
-assets/receipts/
-*.pdf
-*.xlsx
-*.xls
-*.zip
-*.csv
-*.tsv
-*.backup.json
-*_private_*
-
-# Local build, cache, and handoff directories
-node_modules/
-output/
-tmp/
-_tmp_*/
-.claude/
-.agents/
-.codex/
-handoff/
-vendor/
+# Public repository allowlist.
+# Everything else in this working folder is private/local and must never be staged.
+*
+!.gitignore
+!index.html
+!style.css
+!privacy-migration.js
