@@ -1,6 +1,12 @@
 (() => {
   'use strict';
 
+  const PRIVATE_APP_URL = 'https://script.google.com/macros/s/AKfycbw0l7mxZXjkW_0KT_Q4duwub1Ue_5xujKEnhzbpLgEMxHtaRKeLfTySpHJomyrt2zCB/exec';
+  if (window.location.hash === '#accounting') {
+    window.location.replace(PRIVATE_APP_URL);
+    return;
+  }
+
   const STORAGE_KEY = 'cdp-accounting-clean-v1';
   const status = document.getElementById('legacy-status');
   const exportButton = document.getElementById('export-legacy');
