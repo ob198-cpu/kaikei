@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow,noarchive">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>CDP会計｜非公開Google版へ移行</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="page-shell">
+    <section class="hero" aria-labelledby="page-title">
+      <p class="eyebrow">CDP ACCOUNTING</p>
+      <h1 id="page-title">会計システムは<br>非公開Google版へ移行しました</h1>
+      <p class="lead">売上・経費・レシート・税理士提出資料は、公開Webページではなく、Googleログインと権限確認が必要な領域で管理します。</p>
+      <div class="actions">
+        <a class="primary-button" href="https://script.google.com/macros/s/AKfycby7szK8g7aqkawjgngLmO4IMkGXY1Dte1fBXxHE9mKn78eVCE3m9J1-9Hm6doiHX2TJ/exec" target="_blank" rel="noopener noreferrer">非公開会計システムを開く</a>
+      </div>
+      <p class="access-note">所有者のGoogleアカウントでログインしている場合だけ利用できます。</p>
+    </section>
+
+    <section class="panel" aria-labelledby="privacy-title">
+      <div>
+        <p class="section-number">01</p>
+        <h2 id="privacy-title">公開ページに会計データを置きません</h2>
+      </div>
+      <ul class="check-list">
+        <li>金額・取引先・請求書番号をHTML／JavaScriptに埋め込みません。</li>
+        <li>レシートや明細PDFをGitHub Pagesから配信しません。</li>
+        <li>この案内ページから外部へ会計データを送信しません。</li>
+      </ul>
+    </section>
+
+    <section class="panel migration-panel" aria-labelledby="migration-title">
+      <div>
+        <p class="section-number">02</p>
+        <h2 id="migration-title">この端末に残る旧データの救出</h2>
+        <p>旧画面のブラウザ保存データがある場合だけ、JSONとして端末へ書き出せます。書き出し内容はGoogleへ自動送信されません。</p>
+      </div>
+      <div class="migration-actions">
+        <p id="legacy-status" class="status" role="status" aria-live="polite">旧データを確認しています…</p>
+        <button id="export-legacy" class="secondary-button" type="button" disabled>旧データを端末へ書き出す</button>
+        <button id="clear-legacy" class="text-button" type="button" disabled>書き出し後に端末から削除</button>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <p>公開版には案内と救出機能だけを残しています。</p>
+  </footer>
+  <script src="privacy-migration.js" defer></script>
+</body>
+</html>
