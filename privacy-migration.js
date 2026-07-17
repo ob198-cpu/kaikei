@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const PRIVATE_APP_URL = 'https://script.google.com/macros/s/AKfycbw0l7mxZXjkW_0KT_Q4duwub1Ue_5xujKEnhzbpLgEMxHtaRKeLfTySpHJomyrt2zCB/exec';
+  const PRIVATE_APP_URL = 'https://script.google.com/macros/s/AKfycbxwDfO8JGz07pl5abcBOYtFN6r1P1V926n0kvL5Lz3KRTV_Q68pQZY0-Ox_I47IxsNn/exec';
   if (window.location.hash === '#accounting') {
     window.location.replace(PRIVATE_APP_URL);
     return;
